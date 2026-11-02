@@ -210,6 +210,65 @@ def pm_line(m):
     return None
 
 
+def pm_info(m):
+    """Normalize one Polymarket US market (moneyline / full-game spread / full-game total)."""
+    if m.get("closed") or m.get("status") not in (None, "MARKET_STATUS_OPEN"):
+        return None
+    sides = m.get("marketSides") or []
+    if len(sides) != 2:
+        return None
+    long_side = next((x for x in sides if x.get("long")), sides[0])
+    short_side = next((x for x in sides if x is not long_side), sides[1])
+    info = {"slug": m.get("slug"), "fee": f(m.get("feeCoefficient")) or KALSHI_TAKER, "q": m.get("question") or "",
+            "type": m.get("marketType"),
+            "long": {"desc": long_side.get("description"),
+                     "team": pm_team(long_side.get("team"), long_side.get("description"))},
+            "short": {"desc": short_side.get("description"),
+                      "team": pm_team(short_side.get("team"), short_side.get("description"))},
+            "quote": (quote_val(m.get("bestBidQuote")), quote_val(m.get("bestAskQuote")))}
+    if info["type"] == "spreads":
+        h = f(long_side.get("description"))
+        info["h_long"] = h if h is not None else pm_line(m)
+        if info["h_long"] is None:
+            return None
+    elif info["type"] == "totals":
+        t = pm_line(m)
+        if t is None or "over" not in (long_side.get("description") or "").lower():
+            return None
+        info["line"] = abs(t)
+    return info
+
+
+def slug_num(x):
+    """28.5 -> '28pt5' (Polymarket slug style)."""
+    whole = int(abs(x))
+    frac = int(round((abs(x) - whole) * 10))
+    return f"{whole}pt{frac}"
+
+
+def pm_markets_by_slug(slugs, chunk=80):
+    """Fetch markets (with live quotes) by exact slug, many per request. Missing slugs just don't come back."""
+    slugs = list(dict.fromkeys(slugs))
+    chunks = [slugs[i:i + chunk] for i in range(0, len(slugs), chunk)]
+
+    def fetch(ch):
+        want = set(ch)
+        try:
+            d = get_json(f"{PM}/v1/markets", params=[("slug", x) for x in ch] + [("limit", len(ch))])
+            return [m for m in d.get("markets") or [] if m.get("slug") in want]
+        except Exception as e:  # noqa: BLE001
+            log(f"pm slug batch failed: {e!r}"[:200])
+            return []
+
+    out = {}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        for ms in ex.map(fetch, chunks):
+            for m in ms:
+                out[m["slug"]] = m
+    log(f"polymarket: asked for {len(slugs)} markets in {len(chunks)} requests, {len(out)} exist")
+    return out
+
+
 def pm_games(now):
     lo = (now - dt.timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
     hi = (now + dt.timedelta(days=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -248,37 +307,12 @@ def pm_games(now):
              "teams": [pm_team(t, mascots.get(t.get("abbreviation"))) for t in (e.get("teams") or [])],
              "ml": None, "spread": [], "total": []}
         for m in e.get("markets") or []:
-            if m.get("closed") or m.get("status") not in (None, "MARKET_STATUS_OPEN"):
-                continue
-            mtype, q = m.get("marketType"), m.get("question") or ""
-            sides = m.get("marketSides") or []
-            if len(sides) != 2:
-                continue
-            long_side = next((s for s in sides if s.get("long")), sides[0])
-            short_side = next((s for s in sides if s is not long_side), sides[1])
-            info = {"slug": m.get("slug"), "fee": f(m.get("feeCoefficient")) or KALSHI_TAKER, "q": q,
-                    "long": {"desc": long_side.get("description"),
-                             "team": pm_team(long_side.get("team"), long_side.get("description"))},
-                    "short": {"desc": short_side.get("description"),
-                              "team": pm_team(short_side.get("team"), short_side.get("description"))}}
-            if re.search(r" - [^?]+\?$", q) or "-tt-" in (m.get("slug") or ""):
-                continue  # halves, quarters, maps, team totals
-            if mtype == "moneyline":
-                g["ml"] = info
-                if not g["teams"]:
-                    g["teams"] = [info["long"]["team"], info["short"]["team"]]
-            elif mtype == "spreads":
-                h = f(long_side.get("description"))
-                if h is None:
-                    h = pm_line(m)
-                if h is not None:
-                    info["h_long"] = h
-                    g["spread"].append(info)
-            elif mtype == "totals":
-                t = pm_line(m)
-                if t is not None and "over" in (long_side.get("description") or "").lower():
-                    info["line"] = abs(t)
-                    g["total"].append(info)
+            if m.get("marketType") == "moneyline":
+                info = pm_info(m)
+                if info:
+                    g["ml"] = info
+                    if not g["teams"]:
+                        g["teams"] = [info["long"]["team"], info["short"]["team"]]
         if g["ml"] or g["spread"] or g["total"]:
             games.append(g)
     log(f"polymarket: {len(games)} games " + json.dumps({lg: sum(1 for g in games if g['league'] == lg) for lg in LEAGUES}))
@@ -526,8 +560,39 @@ def main():
         kgames = kalshi_games()
         pgames = pm_games(now)
         pairs, unmatched = match(kgames, pgames)
-        slugs = [i["slug"] for _, pg, _ in pairs for i in ([pg["ml"]] if pg["ml"] else []) + pg["spread"] + pg["total"]]
-        quotes = pm_quotes(slugs)
+
+        def live(q):  # a Kalshi line worth pricing: some real quote between 3c and 97c
+            return any(x is not None and 0.03 <= x <= 0.97 for x in (q.get("ya"), q.get("yb")))
+
+        want = []
+        for kg, pg, _ in pairs:
+            if pg["ml"]:
+                want.append(pg["ml"]["slug"])
+            base = pg["slug"]
+            for x in sorted({x for _, x, q in kg["spread"] if live(q)}):
+                want += [f"asc-{base}-pos-{slug_num(x)}", f"asc-{base}-neg-{slug_num(x)}"]
+            for t in sorted({t for t, q in kg["total"] if live(q)}):
+                want.append(f"tsc-{base}-{slug_num(t)}")
+        markets = pm_markets_by_slug(want)
+        quotes = {}
+        for kg, pg, _ in pairs:
+            base = pg["slug"]
+            pg["spread"], pg["total"] = [], []
+            for slug_, m in ((x, markets.get(x)) for x in [f"asc-{base}-pos-{slug_num(v)}" for _, v, _ in kg["spread"]]
+                             + [f"asc-{base}-neg-{slug_num(v)}" for _, v, _ in kg["spread"]]):
+                if m and slug_ not in {i["slug"] for i in pg["spread"]}:
+                    info = pm_info(m)
+                    if info and info["type"] == "spreads":
+                        pg["spread"].append(info)
+            for t, _ in kg["total"]:
+                m = markets.get(f"tsc-{base}-{slug_num(t)}")
+                if m and m["slug"] not in {i["slug"] for i in pg["total"]}:
+                    info = pm_info(m)
+                    if info and info["type"] == "totals":
+                        pg["total"].append(info)
+            for info in ([pg["ml"]] if pg["ml"] else []) + pg["spread"] + pg["total"]:
+                m = markets.get(info["slug"])
+                quotes[info["slug"]] = (quote_val(m.get("bestBidQuote")), quote_val(m.get("bestAskQuote"))) if m else info["quote"]
         opps = evaluate(pairs, quotes)
         # sizes on the Polymarket side for anything worth showing
         top = opps[:80]
