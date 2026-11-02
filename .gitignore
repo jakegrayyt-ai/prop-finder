@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+cache/
+debug/
+site/data/
+.venv/
