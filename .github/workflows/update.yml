@@ -1,9 +1,9 @@
 name: update
 
-# Pulls Kalshi props + ESPN stats, rebuilds the board and publishes the site.
+# Pulls Kalshi props + ESPN stats and Kalshi vs Polymarket US game prices, then publishes the site.
 on:
   schedule:
-    - cron: "7,27,47 * * * *"   # about every 20 minutes
+    - cron: "2,12,22,32,42,52 * * * *"   # about every 10 minutes
   workflow_dispatch:
   push:
     branches: [main]
@@ -43,6 +43,11 @@ jobs:
 
       - name: Build board
         run: python -m pipeline.build
+
+      - name: Scan Kalshi vs Polymarket US for arbitrage
+        continue-on-error: true
+        timeout-minutes: 8
+        run: python -m pipeline.arb
 
       - name: Save data cache
         if: always()
