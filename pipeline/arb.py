@@ -180,11 +180,16 @@ def pm_team(t, mascot_hint=None):
     mascot, schools = "", []
     for cand in (mascot_hint, t.get("alias"), t.get("safeName")):
         ct = tokens(cand)
+        variants = [ct]
         # "SJ Sharks" / "PHI Eagles" carry a leading abbreviation: the mascot is what follows it
-        for mt in (ct, ct[1:] if len(ct) > 1 else []):
+        first = (cand or "").split()[0] if (cand or "").split() else ""
+        if len(ct) > 1 and first.isupper() and 2 <= len(first) <= 4:
+            variants.append(ct[1:])
+        for mt in variants:
             if mt and len(mt) < len(nt) and nt[-len(mt):] == mt:
                 mascot = " ".join(mt)
-                schools.append(" ".join(nt[: -len(mt)]))
+                tag = paren_tag(name)  # keep "(OH)" so Miami (FL) can't match Miami (OH)
+                schools.append(" ".join(nt[: -len(mt)]) + (f" ({' '.join(tag)})" if tag else ""))
                 break
         if schools:
             break
