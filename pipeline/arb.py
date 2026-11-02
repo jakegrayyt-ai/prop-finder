@@ -176,11 +176,17 @@ def pm_team(t, mascot_hint=None):
     """Polymarket team -> its school/city part ('Western Kentucky Hilltoppers' -> 'Western Kentucky')."""
     t = t or {}
     name = t.get("name") or t.get("alias") or t.get("safeName") or ""
+    nt = tokens(name)
     mascot, schools = "", []
     for cand in (mascot_hint, t.get("alias"), t.get("safeName")):
-        if cand and cand != name and name.lower().endswith(" " + cand.lower()):
-            mascot = cand
-            schools.append(name[: -len(cand)].strip())
+        ct = tokens(cand)
+        # "SJ Sharks" / "PHI Eagles" carry a leading abbreviation: the mascot is what follows it
+        for mt in (ct, ct[1:] if len(ct) > 1 else []):
+            if mt and len(mt) < len(nt) and nt[-len(mt):] == mt:
+                mascot = " ".join(mt)
+                schools.append(" ".join(nt[: -len(mt)]))
+                break
+        if schools:
             break
     if not schools:
         schools.append(name)  # tennis players, or no mascot found
@@ -360,7 +366,8 @@ def match(kgames, pgames):
         best = None
         for pg in by_lg.get(kg["league"], []):
             dd = abs((dt.date.fromisoformat(pg["date"]) - dt.date.fromisoformat(kg["date"])).days)
-            if dd > 1 or len(pg["teams"]) < 2:
+            # tennis order of play shifts by a day or two; team sports keep their date
+            if dd > (2 if kg["league"] in ("atp", "wta") else 1) or len(pg["teams"]) < 2:
                 continue
             p0, p1 = pg["teams"][0], pg["teams"][1]
             if same_team(kt[0], p0) and same_team(kt[1], p1):
