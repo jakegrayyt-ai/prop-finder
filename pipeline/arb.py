@@ -386,7 +386,11 @@ def match(kgames, pgames):
         if best:
             pairs.append((kg, best[1], best[2]))
         else:
-            unmatched.append(f"{kg['league']} {kg['date']} {' vs '.join(kg['teams'].values())}")
+            near = [f"{pg['title']} [{' | '.join(','.join(t['schools']) + '/' + str(t.get('abbr')) for t in pg['teams'])}]"
+                    for pg in by_lg.get(kg["league"], []) if pg["date"] == kg["date"]
+                    and any(tokens(n)[:1] == tokens(t["name"])[:1] for n in kg["teams"].values() for t in pg["teams"])][:2]
+            unmatched.append(f"{kg['league']} {kg['date']} {' vs '.join(f'{v}/{k}' for k, v in kg['teams'].items())}"
+                             + (f"  ~ {near}" if near else ""))
     return pairs, unmatched
 
 
@@ -428,6 +432,17 @@ def combo(league, kind, line_txt, kg, pg, k_leg, p_leg, start):
     }
 
 
+STATS = defaultdict(lambda: {"pairs": 0, "best": 9.0})
+
+
+def note(kind, kp, pp, coef):
+    if ok(kp) and ok(pp):
+        st = STATS[kind]
+        st["pairs"] += 1
+        per = (CONTRACTS * (kp + pp) + k_fee(kp) + pm_fee(pp, coef)) / CONTRACTS
+        st["best"] = min(st["best"], round(per, 4))
+
+
 def evaluate(pairs, quotes):
     found = []
     for kg, pg, assign in pairs:
@@ -450,6 +465,7 @@ def evaluate(pairs, quotes):
                 if not pside:
                     continue
                 pp = pm_buy(pq, pside)
+                note("Moneyline", kp, pp, info["fee"])
                 r = combo(lg, "Moneyline", None, kg, pg, (kp, kn, kside, kq, klabel),
                           (pp, pside, info, f"{info[pside]['desc'] or names[other]} to win", pq), start)
                 if r:
@@ -477,6 +493,7 @@ def evaluate(pairs, quotes):
                 for kleg, klab, pside, plab in pairs_:
                     if not kleg:
                         continue
+                    note("Spread", kleg[0], pm_buy(pq, pside), info["fee"])
                     r = combo(lg, "Spread", f"{x:g}", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
                               (pm_buy(pq, pside), pside, info, plab, pq), start)
                     if r:
@@ -491,6 +508,7 @@ def evaluate(pairs, quotes):
                                                 (k_buy_no(kq), f"Under {t:g}", "long", f"Over {t:g}")):
                     if not kleg:
                         continue
+                    note("Total", kleg[0], pm_buy(pq, pside), info["fee"])
                     r = combo(lg, "Total", f"{t:g}", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
                               (pm_buy(pq, pside), pside, info, plab, pq), start)
                     if r:
@@ -527,6 +545,18 @@ def main():
         result.update({"ok": True, "opps": top, "counts": counts, "n_arbs": sum(1 for o in opps if o["per"] < 1),
                        "n_close": len(opps), "secs": round(time.time() - t0, 1)})
         log(f"arb: {len(pairs)} matched games, {result['n_arbs']} arbs, {len(opps)} within ${WATCH_MAX:.2f}")
+        pm_sp = sum(len(pg["spread"]) for _, pg, _ in pairs)
+        pm_to = sum(len(pg["total"]) for _, pg, _ in pairs)
+        k_sp = sum(len(kg["spread"]) for kg, _, _ in pairs)
+        k_to = sum(len(kg["total"]) for kg, _, _ in pairs)
+        log(f"pairs priced: {json.dumps(STATS)}; matched games carry PM spreads={pm_sp} totals={pm_to}, "
+            f"Kalshi spreads={k_sp} totals={k_to}")
+        ex_sp = [(kg["key"], [(c, x) for c, x, _ in kg["spread"]][:6], [(i["h_long"], i["long"]["desc"], i["long"]["team"]["abbr"]) for i in pg["spread"]][:4])
+                 for kg, pg, _ in pairs if pg["spread"] and kg["spread"]][:6]
+        ex_to = [(kg["key"], sorted(t for t, _ in kg["total"])[:8], [i["line"] for i in pg["total"]][:4])
+                 for kg, pg, _ in pairs if pg["total"] and kg["total"]][:6]
+        log(f"spread examples: {ex_sp}")
+        log(f"total examples: {ex_to}")
         debug = {"unmatched_kalshi": unmatched[:300], "log": _log[-200:]}
     except Exception:  # noqa: BLE001
         log("arb failed:\n" + traceback.format_exc())
