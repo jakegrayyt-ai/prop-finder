@@ -484,7 +484,7 @@
     html += contextHTML(r, st.pf);
     html += logHTML(st.pf, r, st.stat);
     html += `<div class="cta"><a href="${esc(kalshiUrl(r.id))}" target="_blank" rel="noopener">Open on Kalshi</a></div>
-      <p class="note">Prices here can be up to about 20 minutes old. Check the live price on Kalshi before you trade. If a player doesn’t play, Kalshi settles the market at a fair price instead of yes or no.</p>`;
+      <p class="note">Prices here can be up to about 10 minutes old. Check the live price on Kalshi before you trade. If a player doesn’t play, Kalshi settles the market at a fair price instead of yes or no.</p>`;
     const hadFocus = $('#drawer').contains(document.activeElement) || document.activeElement === document.body;
     $('#d-inner').innerHTML = html;
     renderChartOnly(gs);
