@@ -25,6 +25,16 @@ def get(key, ttl=None):
     return blob.get("data")
 
 
+def entry(key):
+    """Return (data, saved_at_epoch) regardless of age, or (None, 0)."""
+    try:
+        with open(_path(key)) as f:
+            blob = json.load(f)
+        return blob.get("data"), blob.get("_ts", 0)
+    except (OSError, ValueError):
+        return None, 0
+
+
 def put(key, data):
     p = _path(key)
     os.makedirs(os.path.dirname(p), exist_ok=True)
