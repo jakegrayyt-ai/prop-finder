@@ -6,13 +6,27 @@ A research board for **Kalshi player props** in the NBA, NFL and NHL. For every 
 
 ## How it works
 
-A GitHub Actions job (`.github/workflows/update.yml`) runs about every 20 minutes:
+A GitHub Actions job (`.github/workflows/update.yml`) runs about every 10 minutes:
 
 1. **Kalshi** (public market data, no account or API key). It reads every open market in the standard player-prop series: NBA points, rebounds, assists, threes, PRA, steals, blocks, steals + blocks, double-doubles and triple-doubles. NFL passing, rushing and receiving yards, receptions, touchdowns, passing TDs, completions, attempts, interceptions and longest plays. NHL goals, points, assists and goalie saves.
 2. **ESPN** (public JSON, also one of Kalshi's settlement sources). It pulls rosters, schedules with betting totals, injury reports, each player's game log for this season and last season, and every finished box score this season. The box scores feed the opponent-defense numbers.
 3. **The model** (`pipeline/model.py`) estimates tonight's average for the stat. It weights recent games more and pulls toward last season while the sample is small. Then it nudges for matchup, home or away, the betting total and back-to-backs, and turns that into a chance of reaching the line.
 4. **The edge** compares that to Kalshi's price after the fee (0.07 × price × (1 − price) per contract). Kalshi's price is treated as a strong prior, so the model only moves it part of the way. When a liquid market and the model disagree by more than 15 points, the prop is flagged **Check news**, and the edge stays close to the market. A gap that size usually means an injury or lineup change the box scores don't show yet.
 5. The results are written to `site/data/` and published to the `gh-pages` branch, which GitHub Pages serves.
+
+## Arbitrage page
+
+**https://jakegrayyt-ai.github.io/prop-finder/arb.html**
+
+Every scan (about every 10 minutes), `pipeline/arb.py` lists the next 6 days of NFL, NBA, NHL, college football, men's college basketball and ATP/WTA tennis games on both **Kalshi** and **Polymarket US** (the US-regulated app, not polymarket.com). It matches the same game on both sites by date and exact school or city name, so Kentucky never pairs with Western Kentucky. Then it prices every pair of opposite bets:
+
+- Moneyline: Team A on one site + Team B on the other
+- Spread: Team A −X on one site + Team B +X on the other (the same X only)
+- Total: Over T on one site + Under T on the other (the same T only)
+
+A pair is an **arbitrage** when both prices plus both taker fees come to less than $1 per contract. Kalshi's fee is 0.07 × price × (1 − price). Polymarket US lists a fee rate on each market (0.0695 right now), applied the same way. Both round up per order. Games that have started are skipped, and so are 1–2¢ longshots. The page re-checks Polymarket US prices live every 30 seconds (its API allows that from a browser). Kalshi's API doesn't, so Kalshi prices come from the last scan.
+
+Real arbitrage is rare. The two sites usually agree within a few cents, and the combined fee is about 3¢ at even odds. Before trading, check both live prices, the available size, and both sites' rules (NFL ties, tennis retirements and postponements can settle differently).
 
 ## Reading the board
 
@@ -31,7 +45,7 @@ Hit rates are colored **against the price**, not against 50%. A 60% hit rate on 
 
 ## Honest limits
 
-- The data refreshes about every 20 minutes. Always check the live price on Kalshi before trading.
+- The data refreshes about every 10 minutes. Always check the live price on Kalshi before trading.
 - The model only knows box scores. It doesn't know about an injured teammate, a new starter or a blowout risk. Kalshi's traders often do.
 - Small samples (early season, rookies, players who changed teams) are noisy. Those props are marked low confidence.
 - If a player doesn't play, Kalshi settles the market at a fair price instead of Yes or No.
@@ -51,6 +65,7 @@ pipeline/espn.py       ESPN rosters, schedules, injuries, game logs, box scores
 pipeline/matchups.py   opponent defense vs position from this season's box scores
 pipeline/stats.py      hit rates, splits, streaks
 pipeline/model.py      projection, probability, Kalshi fee and edge
+pipeline/arb.py        Kalshi vs Polymarket US arbitrage scanner
 pipeline/build.py      ties it together and writes site/data/
 site/                  the website (plain HTML, CSS and JavaScript)
 ```

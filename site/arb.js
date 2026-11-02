@@ -59,7 +59,7 @@
     return mins < 1 ? 'just now' : mins < 60 ? `${mins} min ago` : `${Math.floor(mins / 60)} hr ${mins % 60} min ago`;
   }
 
-  const sizeTxt = (n) => (n == null || n <= 0 ? 'Size unknown' : `${Math.floor(n).toLocaleString()} available`);
+  const sizeTxt = (n) => (n == null || n <= 0 ? 'Size unknown' : n < 1 ? 'Less than 1 contract available' : `${Math.floor(n).toLocaleString()} available`);
   const kindTxt = (o) => (o.kind === 'Moneyline' ? 'Moneyline' : `${o.kind} ${o.line}`);
 
   // ------------------------------------------------------------ render
@@ -137,7 +137,7 @@
         <div class="tot"><span>Both sides cost</span><b>${(o.per * 100).toFixed(2)}¢</b><span>per $1 payout, fees included</span></div>
         ${result}
       </div>
-      <p class="plan">${esc(planTxt)}${capped ? ` Only about ${maxN.toLocaleString()} contracts are available at these prices, so you can’t do the full amount.` : ''}</p>
+      <p class="plan">${esc(planTxt)}${capped ? (maxN < 1 ? ' There’s less than 1 contract available at one of these prices right now.' : ` Only about ${maxN.toLocaleString()} contracts are available at these prices, so you can’t do the full amount.`) : ''}</p>
       ${o.note ? `<p class="note">${esc(o.note)}</p>` : ''}
     </article>`;
   }
