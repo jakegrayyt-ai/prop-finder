@@ -1,282 +1,182 @@
-"""One-off discovery for the arbitrage scanner: Polymarket US + Kalshi game markets.
+"""One-off probe (round 5): live/started signals and tennis timing on both sites.
 
-Writes JSON samples to ./debug. Never crashes.
+Writes JSON files to ./debug for reading back from the debug branch.
 """
+import datetime as dt
 import json
 import os
-import time
+import re
 import traceback
 
 import requests
 
-from .net import UA
+from . import kalshi as K
+from .net import UA, get_json
 
-OUT = "debug"
 PM = "https://gateway.polymarket.us"
-KA = "https://api.elections.kalshi.com/trade-api/v2"
-ORIGIN = "https://jakegrayyt-ai.github.io"
-KALSHI_SERIES = [
-    "KXNFLGAME", "KXNBAGAME", "KXNHLGAME", "KXNCAAFGAME", "KXNCAAMBGAME",
-    "KXATPMATCH", "KXWTAMATCH", "KXATPCHALLENGERMATCH",
-    "KXNFLSPREAD", "KXNFLTOTAL", "KXNBASPREAD", "KXNBATOTAL", "KXNHLSPREAD", "KXNHLTOTAL",
-    "KXNCAAFSPREAD", "KXNCAAFTOTAL", "KXNCAAMBSPREAD", "KXNCAAMBTOTAL",
-]
-_log = []
-S = requests.Session()
-S.headers.update({"User-Agent": UA, "Accept": "application/json"})
+KB = K.BASES[0]
+OUT = "debug"
+os.makedirs(OUT, exist_ok=True)
+LOG = []
 
 
-def log(*a):
-    s = " ".join(str(x) for x in a)
-    print(s, flush=True)
-    _log.append(s)
+def log(m):
+    print(m, flush=True)
+    LOG.append(str(m))
 
 
 def save(name, obj):
-    os.makedirs(OUT, exist_ok=True)
-    with open(os.path.join(OUT, name), "w") as f:
-        json.dump(obj, f, indent=1, default=str)
+    with open(os.path.join(OUT, name), "w") as fh:
+        json.dump(obj, fh, indent=1, default=str)
 
 
-def get(url, params=None, name=None, keep=True, origin=True):
-    try:
-        r = S.get(url, params=params, timeout=25, headers={"Origin": ORIGIN} if origin else {})
-        cors = {k: v for k, v in r.headers.items() if k.lower().startswith("access-control")}
-        try:
-            body = r.json()
-        except ValueError:
-            body = r.text[:2000]
-        log(f"{r.status_code} {r.url} cors={cors}")
-        if name and keep:
-            save(name, {"status": r.status_code, "url": r.url, "cors": cors, "body": body})
-        return r.status_code, body, cors
-    except Exception as e:  # noqa: BLE001
-        log(f"ERR {url} {e!r}"[:300])
-        return None, None, {}
+def raw(url, params=None):
+    r = requests.get(url, params=params, headers={"User-Agent": UA, "Accept": "application/json"}, timeout=30)
+    return r.status_code, r.content, r.url
 
 
-def preflight(url):
-    try:
-        r = S.options(url, timeout=20, headers={"Origin": ORIGIN, "Access-Control-Request-Method": "GET"})
-        cors = {k: v for k, v in r.headers.items() if k.lower().startswith("access-control")}
-        log(f"OPTIONS {r.status_code} {url} cors={cors}")
-        return cors
-    except Exception as e:  # noqa: BLE001
-        log(f"OPTIONS ERR {url} {e!r}"[:200])
-        return {}
+PREFIX = {"nfl", "nba", "nhl", "cfb", "cbb", "atp", "atpcq", "atpc", "wta"}
+EV_KEYS = ["slug", "title", "startTime", "startDate", "endDate", "period", "live", "ended", "score", "closed",
+           "active", "elapsed", "gameId", "eventState"]
 
 
-def polymarket():
-    out = {}
-    for typ in ("MONEYLINE", "SPREAD", "TOTAL"):
-        allm, offset = [], 0
-        for _ in range(15):
-            st, body, cors = get(f"{PM}/v1/markets", {"categories": "sports", "sportsMarketTypes": typ, "active": "true",
-                                                    "closed": "false", "limit": 200, "offset": offset}, keep=False)
-            if st != 200 or not isinstance(body, dict):
-                save(f"pm_markets_{typ}_error.json", {"status": st, "body": body})
-                break
-            ms = body.get("markets") or []
-            allm.extend(ms)
-            if len(ms) < 200:
-                break
-            offset += 200
-            time.sleep(0.2)
-        out[typ] = len(allm)
-        save(f"pm_markets_{typ}.json", {"count": len(allm), "keys": sorted({k for m in allm for k in m}),
-                                        "sample": allm[:25], "tail": allm[-5:]})
-        if allm:
-            # what leagues / categories show up
-            cats = {}
-            for m in allm:
-                k = f"{m.get('category')}|{m.get('subcategory')}"
-                cats[k] = cats.get(k, 0) + 1
-            save(f"pm_cats_{typ}.json", cats)
-    log("polymarket counts", out)
-    # one full market + bbo + book
-    try:
-        sample = json.load(open(os.path.join(OUT, "pm_markets_MONEYLINE.json")))["sample"]
-    except (OSError, ValueError, KeyError):
-        sample = []
-    for m in sample[:3]:
-        slug = m.get("slug")
-        if not slug:
-            continue
-        get(f"{PM}/v1/market/slug/{slug}", name=f"pm_market_{slug[:40]}.json")
-        get(f"{PM}/v1/markets/{slug}/bbo", name=f"pm_bbo_{slug[:40]}.json")
-        get(f"{PM}/v1/markets/{slug}/book", name=f"pm_book_{slug[:40]}.json")
-    for path, params in [("/v1/events", {"limit": 10, "active": "true", "categories": "sports"}),
-                         ("/v1/events", {"limit": 5}),
-                         ("/v1/series", {"limit": 50}),
-                         ("/v1/sports", None), ("/v1/leagues", None), ("/v1/sports/leagues", None),
-                         ("/v1/teams", {"limit": 20}), ("/v1/sports/teams", {"limit": 20}),
-                         ("/v1/games", {"limit": 10}), ("/v1/sports/games", {"limit": 10}),
-                         ("/v1/search", {"query": "Lakers"}), ("/v1/search", {"q": "Lakers"})]:
-        get(f"{PM}{path}", params, name="pm_probe_" + path.strip("/").replace("/", "_") + ("_" + "_".join(f"{k}{v}" for k, v in (params or {}).items()))[:60] + ".json")
-    preflight(f"{PM}/v1/markets?limit=1")
-
-
-def kalshi():
-    counts = {}
-    for s in KALSHI_SERIES:
-        st, body, cors = get(f"{KA}/markets", {"series_ticker": s, "status": "open", "limit": 1000}, keep=False, origin=False)
-        ms = (body or {}).get("markets") or [] if isinstance(body, dict) else []
-        counts[s] = len(ms)
-        save(f"k_{s}.json", {"count": len(ms), "sample": ms[:6], "cors": cors})
-        if ms:
-            ev = ms[0].get("event_ticker")
-            get(f"{KA}/events/{ev}", {"with_nested_markets": "true"}, name=f"k_event_{s}.json", origin=False)
-        time.sleep(0.1)
-    log("kalshi counts", counts)
-    for s in ("KXNBAGAME", "KXATPMATCH"):
-        get(f"{KA}/series/{s}", name=f"k_series_{s}.json", origin=False)
-    preflight(f"{KA}/markets?limit=1")
-
-
-def round2():
-    probes = [
-        ("/v1/events", {"closed": "false", "limit": 100}),
-        ("/v1/events", {"closed": "false", "active": "true", "limit": 100, "offset": 100}),
-        ("/v1/events", {"closed": "false", "tagId": 5, "limit": 100}),
-        ("/v1/events", {"closed": "false", "seriesSlug": "nba-2025", "limit": 100}),
-        ("/v1/events", {"closed": "false", "startDateMin": "2026-11-02T00:00:00Z", "limit": 100}),
-        ("/v1/events", {"closed": "false", "orderBy": "startTime", "orderDirection": "asc", "limit": 100}),
-        ("/v1/markets", {"limit": 100}),
-        ("/v1/markets", {"closed": "false", "limit": 100}),
-        ("/v1/markets", {"closed": "false", "limit": 100, "sportsMarketTypes": "moneyline"}),
-        ("/v1/markets", {"closed": "false", "limit": 100, "categories": "sports"}),
-        ("/v1/markets", {"closed": "false", "limit": 100, "tagId": 5}),
-        ("/v1/event/slug/nba-lal-pho-2026-11-15", None),
-        ("/v1/events/slug/nba-lal-pho-2026-11-15", None),
-        ("/v1/markets/aec-nba-lal-pho-2026-11-15/bbo", None),
-        ("/v1/markets/aec-nba-lal-pho-2026-11-15/book", None),
-        ("/v1/search", {"query": "Thunder"}),
-        ("/v1/search", {"query": "Ohio State"}),
-        ("/v1/search", {"query": "Sinner"}),
-    ]
-    for i, (path, params) in enumerate(probes):
-        st, body, cors = get(f"{PM}{path}", params, name=f"r2_{i:02d}.json")
-        if isinstance(body, dict):
-            for k, v in body.items():
-                if isinstance(v, list):
-                    first = v[0] if v else None
-                    log(f"   r2_{i:02d} {k}: n={len(v)} first_slug={(first or {}).get('slug') if isinstance(first, dict) else None}"
-                        f" first_start={(first or {}).get('startTime') if isinstance(first, dict) else None}")
-        time.sleep(0.2)
-
-
-def round3():
-    import datetime as dt
-    now = dt.datetime.now(dt.timezone.utc)
-    lo = (now - dt.timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hi = (now + dt.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    tests = [
-        {"closed": "false", "limit": 100, "sportsMarketTypes": "SPORTS_MARKET_TYPE_MONEYLINE"},
-        {"closed": "false", "limit": 100, "sportsMarketTypes": "MONEYLINE"},
-        {"closed": "false", "limit": 100, "marketType": "moneyline"},
-        {"closed": "false", "limit": 100, "marketTypes": "moneyline"},
-        {"closed": "false", "limit": 100, "orderBy": "gameStartTime", "orderDirection": "asc", "gameStartTimeMin": lo},
-        {"closed": "false", "limit": 100, "startDateMin": lo},
-        {"closed": "false", "limit": 100, "endDateMin": lo, "endDateMax": hi},
-        {"closed": "false", "limit": 100, "slug": "aec-nba-lal-pho-2026-11-15"},
-        {"closed": "false", "limit": 100, "slugs": "aec-nba-lal-pho-2026-11-15"},
-    ]
-    from collections import Counter
-    for i, params in enumerate(tests):
-        st, body, _ = get(f"{PM}/v1/markets", params, keep=False)
-        ms = (body or {}).get("markets") if isinstance(body, dict) else None
-        if ms is None:
-            log(f"   r3 test {i} status={st} body={str(body)[:120]}")
-            continue
-        c = Counter(m.get("marketType") for m in ms)
-        log(f"   r3 test {i} n={len(ms)} types={dict(c)} first={ms[0].get('slug') if ms else None} gst={ms[0].get('gameStartTime') if ms else None}")
-        time.sleep(0.15)
-    # count every open market (paging) and what types they are
-    total, types, quoted, offset, t1 = 0, Counter(), 0, 0, time.time()
-    sample_game = []
-    while offset < 30000:
-        st, body, _ = get(f"{PM}/v1/markets", {"closed": "false", "limit": 100, "offset": offset}, keep=False)
-        ms = (body or {}).get("markets") if isinstance(body, dict) else None
-        if not ms:
-            break
-        for m in ms:
-            types[m.get("marketType")] += 1
-            if m.get("bestAskQuote") or m.get("bestBidQuote"):
-                quoted += 1
-            if m.get("marketType") in ("moneyline", "spread", "total", "spreads", "totals") and len(sample_game) < 40:
-                sample_game.append({k: m.get(k) for k in ("slug", "marketType", "sportsMarketTypeV2", "line", "gameStartTime",
-                                                         "bestAskQuote", "bestBidQuote", "feeCoefficient", "outcomes",
-                                                         "question", "title", "titleShort", "subtitle", "eventSubcategory")} | {
-                    "sides": [(sd.get("description"), sd.get("long"), (sd.get("team") or {}).get("abbreviation"),
-                               (sd.get("team") or {}).get("league"), (sd.get("team") or {}).get("name")) for sd in m.get("marketSides") or []]})
-        total += len(ms)
-        if len(ms) < 100:
-            break
-        offset += 100
-    log(f"   r3 all open markets: {total} in {time.time()-t1:.1f}s types={dict(types)} quoted={quoted} pages={offset//100+1}")
-    save("r3_game_markets_sample.json", sample_game)
-    # events in the next 8 days
-    n, off, prefixes = 0, 0, Counter()
-    while off < 5000:
-        st, body, _ = get(f"{PM}/v1/events", {"closed": "false", "limit": 100, "offset": off, "startDateMin": lo, "startDateMax": hi}, keep=False)
-        evs = (body or {}).get("events") if isinstance(body, dict) else None
-        if not evs:
-            break
-        for e in evs:
-            prefixes[e["slug"].split("-")[0]] += 1
-        n += len(evs)
-        if len(evs) < 100:
-            break
-        off += 100
-    log(f"   r3 events next 8 days: {n} prefixes={prefixes.most_common(40)}")
-
-
-def round4():
-    import datetime as dt
-    now = dt.datetime.now(dt.timezone.utc)
-    lo = (now + dt.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hi = (now + dt.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    picks = []
-    off = 0
-    while off < 4000 and len(picks) < 6:
-        st, body, _ = get(f"{PM}/v1/events", {"closed": "false", "limit": 100, "offset": off, "startDateMin": lo, "startDateMax": hi}, keep=False)
-        evs = (body or {}).get("events") or []
-        for e in evs:
-            mc = e.get("marketCounts") or {}
-            pre = e["slug"].split("-")[0]
-            if pre in ("cbb", "nba", "nhl", "nfl", "cfb") and (mc.get("numSpreadsAndTotalsMarkets") or 0) > 0:
-                if sum(1 for p_ in picks if p_[0].split("-")[0] == pre) < 2:
-                    picks.append((e["slug"], e.get("gameId"), e.get("id"), mc, [m.get("marketType") for m in e.get("markets") or []]))
-        if len(evs) < 100:
-            break
-        off += 100
-    log(f"   r4 picks: {picks}")
-    from collections import Counter
-    for slug, gid, eid, mc, nested in picks[:5]:
-        st, body, _ = get(f"{PM}/v1/events/slug/{slug}", keep=False)
-        ev = (body or {}).get("event") or {}
-        ms = ev.get("markets") or []
-        log(f"   r4 {slug} by-slug markets={len(ms)} types={dict(Counter(m.get('marketType') for m in ms))}")
-        for m in ms[:12]:
-            log(f"      {m.get('marketType')} line={m.get('line')} slug={m.get('slug')} q={(m.get('question') or '')[:110]} sides={[ (sd.get('description'), sd.get('long')) for sd in m.get('marketSides') or []]}")
-        for params in ({"gameId": gid, "limit": 100}, {"gameId": gid, "marketTypes": "spreads", "limit": 100},
-                       {"eventId": eid, "limit": 100}, {"eventSlug": slug, "limit": 100}):
-            st, body, _ = get(f"{PM}/v1/markets", params, keep=False)
-            ms2 = (body or {}).get("markets") or []
-            log(f"   r4 markets {params} -> status {st} n={len(ms2)} types={dict(Counter(m.get('marketType') for m in ms2))} first={(ms2[0].get('slug') if ms2 else None)}")
-        save(f"r4_event_{slug}.json", ev)
+def slim_event(e):
+    d = {k: e.get(k) for k in EV_KEYS if k in e}
+    es = d.get("eventState")
+    if isinstance(es, dict):
+        d["eventState"] = {k: v for k, v in es.items() if k != "marketGroupStats"}
+    ms = e.get("markets") or []
+    d["markets"] = [{k: m.get(k) for k in ("slug", "question", "gameStartTime", "status", "ep3Status", "closed",
+                                            "marketType", "bestBidQuote", "bestAskQuote", "outcomePrices")}
+                    | {"sides": [(s.get("long"), s.get("description"), (s.get("team") or {}).get("name"),
+                                  (s.get("team") or {}).get("abbreviation")) for s in m.get("marketSides") or []]}
+                    for m in ms[:3]]
+    return d
 
 
 def main():
-    t0 = time.time()
-    for fn in (round4,):
+    now = dt.datetime.now(dt.timezone.utc)
+    log(f"now {now.isoformat()}")
+    # 1) Polymarket US listing, now-14h .. now+3d
+    lo = (now - dt.timedelta(hours=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    hi = (now + dt.timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    evs, off = [], 0
+    while off < 6000:
+        d = get_json(f"{PM}/v1/events", params={"closed": "false", "limit": 100, "offset": off,
+                                                "startDateMin": lo, "startDateMax": hi})
+        page = d.get("events") or []
+        evs += [e for e in page if (e.get("slug") or "").split("-")[0] in PREFIX]
+        if len(page) < 100:
+            break
+        off += 100
+    log(f"pm events in window: {len(evs)}")
+    from collections import Counter
+    c = Counter(((e.get("slug") or "").split("-")[0], e.get("period"), e.get("live"), e.get("ended")) for e in evs)
+    log("pm (league, period, live, ended): " + json.dumps(sorted(((list(k), v) for k, v in c.items()), key=str)))
+    started = [slim_event(e) for e in evs if (e.get("startTime") or "") <= now.strftime("%Y-%m-%dT%H:%M:%SZ")
+               or e.get("live") or (e.get("period") not in (None, "", "NS"))]
+    save("pm_started.json", started[:80])
+    tennis = [slim_event(e) for e in evs if (e.get("slug") or "").split("-")[0] in ("atp", "atpcq", "atpc", "wta")]
+    save("pm_tennis.json", tennis)
+    log(f"pm tennis events: {len(tennis)}; started-ish events: {len(started)}")
+    score_vals = Counter(json.dumps(e.get("score"))[:40] for e in evs)
+    log("pm score values: " + json.dumps(score_vals.most_common(12)))
+    # a few full examples of live events (all keys)
+    live_full = [e for e in evs if e.get("live")][:2]
+    for e in live_full:
+        e = dict(e)
+        e["markets"] = (e.get("markets") or [])[:1]
+        e.pop("teams", None)
+        e.pop("tags", None)
+        e.pop("primaryTag", None)
+    save("pm_live_full.json", live_full)
+
+    # 2) endpoint probes for a browser-side live check
+    probes = {}
+    some = [e["slug"] for e in evs[:3]]
+    tslug = next((e["slug"] for e in evs if e["slug"].startswith(("atp", "wta"))), None)
+    lslug = next((e["slug"] for e in evs if e.get("live")), None)
+    tests = [
+        ("events_slug_multi", f"{PM}/v1/events", [("slug", s) for s in some] + [("limit", 10)]),
+        ("events_live_true", f"{PM}/v1/events", {"live": "true", "limit": 100, "closed": "false"}),
+        ("events_slug_one_tennis", f"{PM}/v1/events/slug/{tslug}", None),
+        ("events_slug_one_live", f"{PM}/v1/events/slug/{lslug}", None),
+    ]
+    for name, url, params in tests:
         try:
-            fn()
-        except Exception:  # noqa: BLE001
-            log("CRASH", fn.__name__, traceback.format_exc())
-    log(f"done {time.time() - t0:.1f}s")
-    save("_log.json", _log)
+            st, body, full = raw(url, params)
+            info = {"status": st, "bytes": len(body), "url": full}
+            try:
+                j = json.loads(body)
+                if isinstance(j, dict) and "events" in j:
+                    info["n"] = len(j["events"])
+                    info["slugs"] = [x.get("slug") for x in j["events"]][:12]
+                    info["periods"] = [(x.get("period"), x.get("live")) for x in j["events"]][:12]
+                elif isinstance(j, dict):
+                    ev = j.get("event", j)
+                    info["keys"] = list(ev.keys())[:60] if isinstance(ev, dict) else str(type(ev))
+                    if isinstance(ev, dict):
+                        info["n_markets"] = len(ev.get("markets") or [])
+                        info["period"] = ev.get("period")
+                        info["live"] = ev.get("live")
+                        info["score"] = ev.get("score")
+            except ValueError:
+                info["text"] = body[:300].decode("utf-8", "replace")
+            probes[name] = info
+        except Exception as e:  # noqa: BLE001
+            probes[name] = repr(e)[:300]
+    # markets endpoint for the live event's moneyline: any game-state fields?
+    if lslug:
+        le = next(e for e in evs if e["slug"] == lslug)
+        ml = next((m for m in le.get("markets") or [] if m.get("marketType") == "moneyline"), None)
+        if ml:
+            st, body, _ = raw(f"{PM}/v1/markets", [("slug", ml["slug"]), ("limit", 1)])
+            try:
+                mm = (json.loads(body).get("markets") or [{}])[0]
+                probes["market_of_live_event_keys"] = sorted(mm.keys())
+                probes["market_of_live_event"] = {k: mm.get(k) for k in ("slug", "gameStartTime", "status", "ep3Status",
+                                                                          "closed", "active", "bestBidQuote", "bestAskQuote")}
+            except ValueError:
+                pass
+    save("probes.json", probes)
+    log("probes: " + json.dumps(probes)[:3000])
+
+    # 3) Kalshi timing fields for tennis + team sports
+    kout = {}
+    for s in ["KXWTAMATCH", "KXATPMATCH", "KXATPCHALLENGERMATCH", "KXNBAGAME", "KXNCAAMBGAME", "KXNFLGAME", "KXNHLGAME"]:
+        try:
+            ms = K.fetch_series(KB, s)
+        except Exception as e:  # noqa: BLE001
+            log(f"kalshi {s} failed {e!r}")
+            continue
+        rows = []
+        for m in ms:
+            rows.append({k: m.get(k) for k in ("ticker", "event_ticker", "title", "status", "occurrence_datetime",
+                                                "expected_expiration_time", "open_time", "close_time", "updated_time",
+                                                "yes_bid_dollars", "yes_ask_dollars", "last_price_dollars",
+                                                "previous_price_dollars", "volume_24h_fp")})
+        kout[s] = rows
+        log(f"kalshi {s}: {len(rows)} open markets")
+    save("kalshi_timing.json", kout)
+    # Kalshi batch-by-tickers support (for a future live re-check)
+    try:
+        tk = [r["ticker"] for r in (kout.get("KXNBAGAME") or [])[:3]]
+        d = get_json(f"{KB}/markets", params={"tickers": ",".join(tk)})
+        log(f"kalshi tickers= batch: asked {len(tk)}, got {len(d.get('markets') or [])}: {[m.get('ticker') for m in d.get('markets') or []]}")
+    except Exception as e:  # noqa: BLE001
+        log(f"kalshi tickers= batch failed {e!r}"[:300])
+
+    # 4) the three tennis matches the board showed
+    want = re.compile(r"(tje|hui|colwon|tsuhua|bru|vrb)", re.I)
+    save("pm_named.json", [slim_event(e) for e in evs if want.search(e.get("slug") or "")])
+    named_k = {s: [r for r in rows if re.search(r"(TJEHUI|WONHUA|BRUVRB)", r["event_ticker"] or "")]
+               for s, rows in kout.items()}
+    save("kalshi_named.json", named_k)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:  # noqa: BLE001
+        log(traceback.format_exc())
+    save("_log.json", LOG)
