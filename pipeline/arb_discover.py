@@ -231,9 +231,45 @@ def round3():
     log(f"   r3 events next 8 days: {n} prefixes={prefixes.most_common(40)}")
 
 
+def round4():
+    import datetime as dt
+    now = dt.datetime.now(dt.timezone.utc)
+    lo = (now + dt.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    hi = (now + dt.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    picks = []
+    off = 0
+    while off < 4000 and len(picks) < 6:
+        st, body, _ = get(f"{PM}/v1/events", {"closed": "false", "limit": 100, "offset": off, "startDateMin": lo, "startDateMax": hi}, keep=False)
+        evs = (body or {}).get("events") or []
+        for e in evs:
+            mc = e.get("marketCounts") or {}
+            pre = e["slug"].split("-")[0]
+            if pre in ("cbb", "nba", "nhl", "nfl", "cfb") and (mc.get("numSpreadsAndTotalsMarkets") or 0) > 0:
+                if sum(1 for p_ in picks if p_[0].split("-")[0] == pre) < 2:
+                    picks.append((e["slug"], e.get("gameId"), e.get("id"), mc, [m.get("marketType") for m in e.get("markets") or []]))
+        if len(evs) < 100:
+            break
+        off += 100
+    log(f"   r4 picks: {picks}")
+    from collections import Counter
+    for slug, gid, eid, mc, nested in picks[:5]:
+        st, body, _ = get(f"{PM}/v1/events/slug/{slug}", keep=False)
+        ev = (body or {}).get("event") or {}
+        ms = ev.get("markets") or []
+        log(f"   r4 {slug} by-slug markets={len(ms)} types={dict(Counter(m.get('marketType') for m in ms))}")
+        for m in ms[:12]:
+            log(f"      {m.get('marketType')} line={m.get('line')} slug={m.get('slug')} q={(m.get('question') or '')[:110]} sides={[ (sd.get('description'), sd.get('long')) for sd in m.get('marketSides') or []]}")
+        for params in ({"gameId": gid, "limit": 100}, {"gameId": gid, "marketTypes": "spreads", "limit": 100},
+                       {"eventId": eid, "limit": 100}, {"eventSlug": slug, "limit": 100}):
+            st, body, _ = get(f"{PM}/v1/markets", params, keep=False)
+            ms2 = (body or {}).get("markets") or []
+            log(f"   r4 markets {params} -> status {st} n={len(ms2)} types={dict(Counter(m.get('marketType') for m in ms2))} first={(ms2[0].get('slug') if ms2 else None)}")
+        save(f"r4_event_{slug}.json", ev)
+
+
 def main():
     t0 = time.time()
-    for fn in (round3,):
+    for fn in (round4,):
         try:
             fn()
         except Exception:  # noqa: BLE001
