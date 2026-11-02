@@ -458,7 +458,7 @@ def combo(league, kind, line_txt, kg, pg, k_leg, p_leg, start):
         "lg": league, "kind": kind, "line": line_txt, "date": kg["date"], "start": start,
         "game": pg.get("title") or " vs ".join(kg["teams"].values()),
         "k": {"label": klabel, "side": kside, "price": round(kp, 4), "fee100": kf, "size": kn,
-              "ticker": kq["ticker"], "url": K.market_url(kq["series"], kq["event"])},
+              "ticker": kq["ticker"], "title": kq.get("title"), "url": K.market_url(kq["series"], kq["event"])},
         "p": {"label": plabel, "side": pside, "price": round(pp, 4), "fee100": pf, "fee_coef": pinfo["fee"],
               "slug": pinfo["slug"], "market": pinfo["q"], "bid": pq[0], "ask": pq[1]},
         "cost100": round(cost, 2), "profit100": round(CONTRACTS - cost, 2), "per": round(per, 4),
@@ -494,7 +494,7 @@ def evaluate(pairs, quotes):
                     continue
                 kp, kn, kside = min(opts, key=lambda x: x[0])
                 kq = kg["ml"][c] if kside == "yes" else kg["ml"][other]
-                klabel = f"{names[c]} to win ({'Yes on ' + names[c] if kside == 'yes' else 'No on ' + names[other]})"
+                klabel = f"{names[c]} to win"
                 pside = pm_side_for_team(info, pg, assign[other])
                 if not pside:
                     continue
@@ -595,20 +595,22 @@ def main():
                 quotes[info["slug"]] = (quote_val(m.get("bestBidQuote")), quote_val(m.get("bestAskQuote"))) if m else info["quote"]
         opps = evaluate(pairs, quotes)
         # sizes on the Polymarket side for anything worth showing
-        top = opps[:80]
+        top = opps[:120]
         slugs_top = list(dict.fromkeys(o["p"]["slug"] for o in top))
         with ThreadPoolExecutor(max_workers=6) as ex:
             qty = dict(zip(slugs_top, ex.map(pm_top_qty, slugs_top)))
         for o in top:
             bq, aq = qty.get(o["p"]["slug"], (None, None))
-            o["p"]["size"] = aq if o["p"]["side"] == "long" else bq
+            size = aq if o["p"]["side"] == "long" else bq
+            o["p"]["size"] = size if size and size > 0 else None
         counts = {}
         for lg in LEAGUES:
             counts[lg] = {"kalshi": sum(1 for g in kgames if g["league"] == lg),
                           "poly": sum(1 for g in pgames if g["league"] == lg),
                           "matched": sum(1 for kg, _, _ in pairs if kg["league"] == lg)}
         result.update({"ok": True, "opps": top, "counts": counts, "n_arbs": sum(1 for o in opps if o["per"] < 1),
-                       "n_close": len(opps), "secs": round(time.time() - t0, 1)})
+                       "n_close": len(opps), "checked": {k: v["pairs"] for k, v in STATS.items()},
+                       "best": {k: v["best"] for k, v in STATS.items()}, "secs": round(time.time() - t0, 1)})
         log(f"arb: {len(pairs)} matched games, {result['n_arbs']} arbs, {len(opps)} within ${WATCH_MAX:.2f}")
         pm_sp = sum(len(pg["spread"]) for _, pg, _ in pairs)
         pm_to = sum(len(pg["total"]) for _, pg, _ in pairs)
