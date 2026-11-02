@@ -116,8 +116,9 @@ def prob_at_least(mu, var, threshold, stat):
         scale = var / mu_pos
         p = st.gamma.sf(threshold - 0.5, shape, scale=scale)
     else:
-        if mu <= 0:
-            return 0.0 if threshold > 0 else 1.0
+        # never treat a count as impossible just because it hasn't happened in the sample
+        mu = max(mu, 0.03)
+        var = max(var, mu)
         k = math.ceil(threshold) - 1  # P(X >= t) = 1 - CDF(t-1)
         if var <= mu * 1.02:
             p = st.poisson.sf(k, mu)

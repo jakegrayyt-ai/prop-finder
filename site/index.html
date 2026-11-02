@@ -1,1 +1,97 @@
-<!doctype html><meta charset="utf-8"><title>Prop Finder</title><p>Building…</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prop Finder</title>
+<meta name="description" content="Kalshi NBA, NFL and NHL player props with hit rates, splits, matchups and a fee-adjusted edge.">
+<meta name="theme-color" content="#0c1430">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c1430'/%3E%3Crect x='6' y='16' width='4' height='10' rx='1.5' fill='%23d9446b'/%3E%3Crect x='12' y='9' width='4' height='17' rx='1.5' fill='%2334d399'/%3E%3Crect x='18' y='12' width='4' height='14' rx='1.5' fill='%2334d399'/%3E%3Crect x='24' y='6' width='4' height='20' rx='1.5' fill='%2334d399'/%3E%3Cpath d='M4 14h24' stroke='%23e8ecfa' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#board">Skip to props</a>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="16" width="5" height="12" rx="1.5" class="m-miss"/><rect x="9.5" y="8" width="5" height="20" rx="1.5" class="m-hit"/><rect x="17" y="12" width="5" height="16" rx="1.5" class="m-hit"/><rect x="24.5" y="4" width="5" height="24" rx="1.5" class="m-hit"/><path d="M0 14h32" class="m-line"/></svg>
+      <h1>Prop Finder</h1>
+    </div>
+    <p class="updated" id="updated" aria-live="polite">Loading props…</p>
+  </div>
+  <nav class="leagues" aria-label="League" id="leagues"></nav>
+</header>
+
+<main>
+  <section class="controls" aria-label="Filters">
+    <label class="search">
+      <span class="sr">Search players or teams</span>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>
+      <input id="q" type="search" placeholder="Search player or team" autocomplete="off">
+    </label>
+    <label class="sel"><span>Stat</span><select id="stat"></select></label>
+    <label class="sel"><span>Game</span><select id="game"></select></label>
+    <label class="sel"><span>Sort</span>
+      <select id="sort">
+        <option value="edge">Best edge</option>
+        <option value="gap">Model vs price gap</option>
+        <option value="l10">Last 10 hit rate</option>
+        <option value="szn">Season hit rate</option>
+        <option value="streak">Hot streak</option>
+        <option value="volume">Most traded</option>
+        <option value="time">Game time</option>
+      </select>
+    </label>
+    <label class="tog"><input type="checkbox" id="best" checked><span>Best line per player</span></label>
+    <label class="tog"><input type="checkbox" id="hideLow"><span>Hide low confidence</span></label>
+  </section>
+
+  <details class="key" id="key">
+    <summary>How to read the board</summary>
+    <p><span class="sw g"></span>Green hit rates mean the player has reached the line more often than Kalshi’s price implies. <span class="sw r"></span>Red means less often.</p>
+    <p>Model is a stats-only estimate from this season and last season, adjusted for the matchup, home or away, the game’s betting total and rest. Edge is the expected profit per $1 contract after Kalshi’s fee. It leans on Kalshi’s price, and leans harder when the two disagree a lot, because a big gap usually means news the stats don’t have yet.</p>
+    <p>Tap any row to see every game, every Kalshi line for that stat, and how the model got its number.</p>
+  </details>
+
+  <section id="board" class="board" role="table" aria-label="Player props" aria-rowcount="-1">
+    <div class="row head" role="row">
+      <div class="c-player" role="columnheader">Player</div>
+      <div class="c-prop" role="columnheader">Line</div>
+      <div class="c-kalshi" role="columnheader">Kalshi</div>
+      <div class="c-strip" role="columnheader">Last 10</div>
+      <div class="chips">
+        <div class="c-hr" role="columnheader"><button data-sort="l5">L5</button></div>
+        <div class="c-hr" role="columnheader"><button data-sort="l10">L10</button></div>
+        <div class="c-hr wide" role="columnheader"><button data-sort="l20">L20</button></div>
+        <div class="c-hr" role="columnheader"><button data-sort="szn">Season</button></div>
+        <div class="c-hr" role="columnheader"><button data-sort="h2h">H2H</button></div>
+        <div class="c-hr" role="columnheader"><button data-sort="venue">Venue</button></div>
+        <div class="c-streak" role="columnheader"><button data-sort="streak">Streak</button></div>
+      </div>
+      <div class="c-avg" role="columnheader">L10 avg</div>
+      <div class="c-model" role="columnheader"><button data-sort="gap">Model</button></div>
+      <div class="c-edge" role="columnheader"><button data-sort="edge">Edge</button></div>
+    </div>
+    <div id="rows"></div>
+  </section>
+  <div class="more"><button id="more" hidden>Show more props</button></div>
+  <p class="empty" id="empty" hidden></p>
+
+  <footer class="foot">
+    <p>Lines and prices from Kalshi. Stats, schedules, injuries and betting totals from ESPN, which is also one of Kalshi's settlement sources. The board refreshes about every 20 minutes, so check the live price on Kalshi before you trade.</p>
+    <p>Past results don't guarantee future ones. The model is a starting point for your own research, not a sure thing.</p>
+  </footer>
+</main>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-name" hidden>
+  <div class="d-inner" id="d-inner"></div>
+</aside>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+
+<script src="app.js" defer></script>
+</body>
+</html>

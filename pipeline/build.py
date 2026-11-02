@@ -4,6 +4,7 @@ Run: python -m pipeline.build
 """
 import datetime as dt
 import json
+import math
 import os
 import time
 import traceback
@@ -18,6 +19,8 @@ WORKERS = 8
 GAME_HOURS = {"nba": 2.6, "nhl": 2.8, "nfl": 3.6}
 DEFAULT_TOTAL = {"nba": 228.0, "nfl": 44.5, "nhl": 6.1}
 BINARY = {"dd", "td3"}
+IGNORE_STATUS = {"Active"}
+OUT_STATUS = {"Out", "Injured Reserve", "Suspension"}
 TEAM_ALIASES = {
     "nba": {"WAS": "WSH", "NYK": "NY", "NOP": "NO", "GSW": "GS", "SAS": "SA", "UTA": "UTAH", "PHO": "PHX", "BRK": "BKN"},
     "nfl": {"JAC": "JAX", "WAS": "WSH", "LA": "LAR", "LV": "LV"},
@@ -239,21 +242,24 @@ def evaluate(p, L):
             mu_info = {"base": r2(base["mu"], 2), "mu": r2(mu, 2), "sd": r2(var ** 0.5, 2),
                        "n_cur": base["n_cur"], "n_prev": base["n_prev"]}
 
-    yb, ya, nb, na = p["yes_bid"], p["yes_ask"], p["no_bid"], p["no_ask"]
-    quotes = [x for x in (yb, ya) if x and 0 < x < 1]
-    mid = (yb + ya) / 2 if (yb and ya and 0 < yb and ya < 1) else (ya or yb)
-    e = model.edges(p_model, ya, na)
-    best = max(e, key=e.get) if e else None
-    spread = (ya - yb) if (ya and yb) else None
+    yb, ya = p["yes_bid"], p["yes_ask"]
+    na = p["no_ask"] if p.get("no_ask") and 0 < p["no_ask"] < 1 else ((1 - yb) if yb and yb > 0 else None)
+    two_sided = bool(yb and ya and 0 < yb < ya < 1)
+    mid = (yb + ya) / 2 if two_sided else (ya if ya and 0 < ya < 1 else None)
+    spread = (ya - yb) if two_sided else None
+    liquid = two_sided and spread <= 0.10
 
     inj = L["inj"].get(p["aid"])
     status = (inj or {}).get("status") or ""
+    if status in IGNORE_STATUS:
+        status = ""
+    live = g["state"] == "in"
     flags = []
     if status:
         flags.append(status)
-    if g["state"] == "in":
+    if live:
         flags.append("Live")
-    if spread is None or spread > 0.10 or not quotes:
+    if not liquid:
         flags.append("Wide spread")
     if not p.get("volume"):
         flags.append("No trades yet")
@@ -268,26 +274,38 @@ def evaluate(p, L):
         flags.append("Small sample")
     if any(f in flags for f in ("Questionable", "Doubtful", "Day-To-Day", "Wide spread", "Role change", "Live")):
         conf -= 1
-    if status in ("Out", "Injured Reserve", "Suspension"):
+    if status in OUT_STATUS:
         conf = 0
-    if p_model is not None and mid and abs(p_model - mid) > 0.15:
+    gap = (p_model - mid) if (p_model is not None and mid is not None) else None
+    if liquid and gap is not None and abs(gap) > 0.15:
         flags.append("Check news")
     conf = ["low", "low", "med", "high"][max(0, min(3, conf))]
 
+    # Edge. Kalshi's price is a strong prior, so the stats model only moves it part of
+    # the way, and much less when the gap is big: a big gap on a liquid market usually
+    # means news the box scores don't know about yet (injury, lineup change).
+    p_blend, k = None, None
+    if gap is not None and not live and status not in OUT_STATUS:
+        k = (0.35 if liquid else 0.5) * {"low": 0.5, "med": 1.0, "high": 1.15}[conf]
+        k *= math.exp(-max(0.0, abs(gap) - 0.10) / 0.10)
+        p_blend = model.clamp(mid + k * gap, 0.005, 0.995)
+    e = model.edges(p_blend, ya, na)
+    best = max(e, key=e.get) if e else None
+
     row = {
         "id": p["ticker"], "lg": league, "pid": f"{league}-{p['aid']}", "gid": f"{league}-{p['eid']}",
-        "stat": stat, "sl": p["stat_label"], "line": line, "opp": opp, "home": home,
-        "k": {"yb": r2(yb, 2), "ya": r2(ya, 2), "nb": r2(nb, 2), "na": r2(na, 2), "last": r2(p["last"], 2),
-              "vol": p.get("volume"), "oi": p.get("oi"), "url": kalshi.market_url(p["series"], p["event"])},
+        "stat": stat, "line": line, "opp": opp, "home": home,
+        "k": {"yb": r2(yb, 2), "ya": r2(ya, 2), "last": r2(p["last"], 2),
+              "vol": round(p["volume"]) if p.get("volume") else 0},
         "mid": r2(mid, 3),
-        "h": {k: [v["hit"], v["n"]] for k, v in summ.items() if isinstance(v, dict)},
+        "h": {k: [v["hit"], v["n"]] for k, v in summ.items() if isinstance(v, dict) and k not in ("home2", "away2")},
         "strk": summ["streak"], "avg": summ["avg"], "avg10": summ["avg_l10"], "diff": summ["diff"],
         "last10": [x["s"][stat] for x in played[:10]],
-        "p": r2(p_model), "e": {k: r2(v, 4) for k, v in e.items()}, "best": best, "be": r2(e.get(best), 4) if best else None,
-        "conf": conf, "flags": flags,
+        "p": r2(p_model), "pb": r2(p_blend), "e": {s: r2(v, 4) for s, v in e.items()}, "best": best,
+        "be": r2(e.get(best), 4) if best else None, "conf": conf, "flags": flags,
     }
     detail = {
-        "mu": mu_info, "factors": [[lab, r2(x, 4)] for lab, x in factors], "matchup": mt,
+        "mu": mu_info, "factors": [[lab, r2(x, 4)] for lab, x in factors], "matchup": mt, "k": r2(k),
         "rest": rest, "b2b": b2b, "vol": vol, "total": g.get("total"), "lg_total": r2(L["lg_total"], 1),
         "summary": summ,
     }
@@ -340,6 +358,8 @@ def main():
             if row["pid"] not in players:
                 a = L["athletes"].get(p["aid"]) or {}
                 inj = L["inj"].get(p["aid"])
+                if inj and inj.get("status") in IGNORE_STATUS:
+                    inj = None
                 team = L["teams"].get(p["team_id"], {})
                 players[row["pid"]] = {"name": a.get("name") or p["player_name"], "team": team.get("abbr"),
                                        "pos": a.get("pos"), "lg": league, "inj": inj}
