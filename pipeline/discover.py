@@ -204,9 +204,32 @@ def nhl():
           trim=lambda d: {"keys": list(d.keys()), "gameWeek": (d.get("gameWeek") or [])[:2]})
 
 
+def quick():
+    """Second pass: completed-game box scores, per-date scoreboards, Kalshi paging."""
+    games = {"nba": "401909280", "nfl": "401873023", "nhl": "401892627"}
+    for lg, ev in games.items():
+        sport, league = LEAGUES[lg]
+        probe(f"q_espn_{lg}_summary_final_{ev}.json", f"{ESPN_SITE}/{sport}/{league}/summary", params={"event": ev},
+              trim=lambda d: {"keys": list(d.keys()), "boxscore": d.get("boxscore"),
+                              "header_comp": (d.get("header", {}).get("competitions") or [{}])[0].get("competitors")})
+        probe(f"q_espn_{lg}_scoreboard_20261101.json", f"{ESPN_SITE}/{sport}/{league}/scoreboard",
+              params={"dates": "20261101"}, trim=trim_scoreboard)
+    probe("q_espn_nfl_scoreboard_week9.json", f"{ESPN_SITE}/football/nfl/scoreboard",
+          params={"week": 9, "seasontype": 2}, trim=trim_scoreboard)
+    probe("q_espn_nfl_scoreboard_week1.json", f"{ESPN_SITE}/football/nfl/scoreboard",
+          params={"week": 1, "seasontype": 2, "dates": 2026}, trim=trim_scoreboard)
+    base = KALSHI_BASES[0]
+    probe("q_kalshi_events_nbapts.json", f"{base}/events", params={"series_ticker": "KXNBAPTS", "status": "open", "limit": 5})
+    probe("q_kalshi_markets_page.json", f"{base}/markets",
+          params={"series_ticker": "KXNFLPASSYDSPRECISE", "status": "open", "limit": 3},
+          trim=lambda d: {"keys": list(d.keys()), "cursor": d.get("cursor"), "n": len(d.get("markets") or [])})
+
+
 def main():
+    import sys
     started = time.time()
-    for fn in (kalshi, espn, nhl):
+    mode = sys.argv[1] if len(sys.argv) > 1 else "quick"
+    for fn in ((quick,) if mode == "quick" else (kalshi, espn, nhl)):
         try:
             fn()
         except Exception:  # noqa: BLE001

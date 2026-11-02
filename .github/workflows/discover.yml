@@ -21,12 +21,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - run: python -m pipeline.discover
+      - run: python -m pipeline.discover quick
       - name: Publish debug output to the debug branch
+        if: always()
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd debug
+          mkdir -p debug && cd debug
           git init -q -b debug
           git config user.name "prop-finder-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
