@@ -165,9 +165,75 @@ def round2():
         time.sleep(0.2)
 
 
+def round3():
+    import datetime as dt
+    now = dt.datetime.now(dt.timezone.utc)
+    lo = (now - dt.timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    hi = (now + dt.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tests = [
+        {"closed": "false", "limit": 100, "sportsMarketTypes": "SPORTS_MARKET_TYPE_MONEYLINE"},
+        {"closed": "false", "limit": 100, "sportsMarketTypes": "MONEYLINE"},
+        {"closed": "false", "limit": 100, "marketType": "moneyline"},
+        {"closed": "false", "limit": 100, "marketTypes": "moneyline"},
+        {"closed": "false", "limit": 100, "orderBy": "gameStartTime", "orderDirection": "asc", "gameStartTimeMin": lo},
+        {"closed": "false", "limit": 100, "startDateMin": lo},
+        {"closed": "false", "limit": 100, "endDateMin": lo, "endDateMax": hi},
+        {"closed": "false", "limit": 100, "slug": "aec-nba-lal-pho-2026-11-15"},
+        {"closed": "false", "limit": 100, "slugs": "aec-nba-lal-pho-2026-11-15"},
+    ]
+    from collections import Counter
+    for i, params in enumerate(tests):
+        st, body, _ = get(f"{PM}/v1/markets", params, keep=False)
+        ms = (body or {}).get("markets") if isinstance(body, dict) else None
+        if ms is None:
+            log(f"   r3 test {i} status={st} body={str(body)[:120]}")
+            continue
+        c = Counter(m.get("marketType") for m in ms)
+        log(f"   r3 test {i} n={len(ms)} types={dict(c)} first={ms[0].get('slug') if ms else None} gst={ms[0].get('gameStartTime') if ms else None}")
+        time.sleep(0.15)
+    # count every open market (paging) and what types they are
+    total, types, quoted, offset, t1 = 0, Counter(), 0, 0, time.time()
+    sample_game = []
+    while offset < 30000:
+        st, body, _ = get(f"{PM}/v1/markets", {"closed": "false", "limit": 100, "offset": offset}, keep=False)
+        ms = (body or {}).get("markets") if isinstance(body, dict) else None
+        if not ms:
+            break
+        for m in ms:
+            types[m.get("marketType")] += 1
+            if m.get("bestAskQuote") or m.get("bestBidQuote"):
+                quoted += 1
+            if m.get("marketType") in ("moneyline", "spread", "total", "spreads", "totals") and len(sample_game) < 40:
+                sample_game.append({k: m.get(k) for k in ("slug", "marketType", "sportsMarketTypeV2", "line", "gameStartTime",
+                                                         "bestAskQuote", "bestBidQuote", "feeCoefficient", "outcomes",
+                                                         "question", "title", "titleShort", "subtitle", "eventSubcategory")} | {
+                    "sides": [(sd.get("description"), sd.get("long"), (sd.get("team") or {}).get("abbreviation"),
+                               (sd.get("team") or {}).get("league"), (sd.get("team") or {}).get("name")) for sd in m.get("marketSides") or []]})
+        total += len(ms)
+        if len(ms) < 100:
+            break
+        offset += 100
+    log(f"   r3 all open markets: {total} in {time.time()-t1:.1f}s types={dict(types)} quoted={quoted} pages={offset//100+1}")
+    save("r3_game_markets_sample.json", sample_game)
+    # events in the next 8 days
+    n, off, prefixes = 0, 0, Counter()
+    while off < 5000:
+        st, body, _ = get(f"{PM}/v1/events", {"closed": "false", "limit": 100, "offset": off, "startDateMin": lo, "startDateMax": hi}, keep=False)
+        evs = (body or {}).get("events") if isinstance(body, dict) else None
+        if not evs:
+            break
+        for e in evs:
+            prefixes[e["slug"].split("-")[0]] += 1
+        n += len(evs)
+        if len(evs) < 100:
+            break
+        off += 100
+    log(f"   r3 events next 8 days: {n} prefixes={prefixes.most_common(40)}")
+
+
 def main():
     t0 = time.time()
-    for fn in (round2, kalshi):
+    for fn in (round3,):
         try:
             fn()
         except Exception:  # noqa: BLE001
