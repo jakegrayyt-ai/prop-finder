@@ -64,3 +64,19 @@ jobs:
           git add -A
           git commit -q -m "update $(date -u +%FT%TZ)"
           git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages:gh-pages
+
+      # GitHub pauses scheduled jobs in public repos after 60 days without a commit.
+      # One tiny commit a month keeps the 20-minute updates running indefinitely.
+      - name: Keep the schedule alive
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( ($(date +%s) - last) / 86400 )) -ge 30 ]; then
+            git config user.name "prop-finder-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            date -u +%FT%TZ > .github/keepalive
+            git add .github/keepalive
+            git commit -q -m "Keep scheduled updates running"
+            git push -q origin HEAD:main
+          fi

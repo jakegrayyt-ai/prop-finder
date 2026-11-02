@@ -40,7 +40,7 @@ Hit rates are colored **against the price**, not against 50%. A 60% hit rate on 
 ## Running it
 
 - **Run now:** Actions tab → `update` → **Run workflow**.
-- **Schedule paused?** GitHub pauses scheduled jobs in public repos after 60 days without commits. Open the Actions tab and click **Enable workflow**, or push any commit.
+- **Schedule paused?** GitHub pauses scheduled jobs in public repos after 60 days without commits, so the job makes one small commit a month to prevent that. If it ever does pause, open the Actions tab and click **Enable workflow**.
 - **Locally:** `pip install -r requirements.txt && python -m pipeline.build`, then serve the `site/` folder (`python -m http.server -d site`).
 
 ## Files
