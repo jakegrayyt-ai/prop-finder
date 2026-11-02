@@ -38,9 +38,9 @@ def save(name, obj):
         json.dump(obj, f, indent=1, default=str)
 
 
-def get(url, params=None, name=None, keep=True):
+def get(url, params=None, name=None, keep=True, origin=True):
     try:
-        r = S.get(url, params=params, timeout=25, headers={"Origin": ORIGIN})
+        r = S.get(url, params=params, timeout=25, headers={"Origin": ORIGIN} if origin else {})
         cors = {k: v for k, v in r.headers.items() if k.lower().startswith("access-control")}
         try:
             body = r.json()
@@ -119,23 +119,55 @@ def polymarket():
 def kalshi():
     counts = {}
     for s in KALSHI_SERIES:
-        st, body, cors = get(f"{KA}/markets", {"series_ticker": s, "status": "open", "limit": 1000}, keep=False)
+        st, body, cors = get(f"{KA}/markets", {"series_ticker": s, "status": "open", "limit": 1000}, keep=False, origin=False)
         ms = (body or {}).get("markets") or [] if isinstance(body, dict) else []
         counts[s] = len(ms)
         save(f"k_{s}.json", {"count": len(ms), "sample": ms[:6], "cors": cors})
         if ms:
             ev = ms[0].get("event_ticker")
-            get(f"{KA}/events/{ev}", {"with_nested_markets": "true"}, name=f"k_event_{s}.json")
+            get(f"{KA}/events/{ev}", {"with_nested_markets": "true"}, name=f"k_event_{s}.json", origin=False)
         time.sleep(0.1)
     log("kalshi counts", counts)
     for s in ("KXNBAGAME", "KXATPMATCH"):
-        get(f"{KA}/series/{s}", name=f"k_series_{s}.json")
+        get(f"{KA}/series/{s}", name=f"k_series_{s}.json", origin=False)
     preflight(f"{KA}/markets?limit=1")
+
+
+def round2():
+    probes = [
+        ("/v1/events", {"closed": "false", "limit": 100}),
+        ("/v1/events", {"closed": "false", "active": "true", "limit": 100, "offset": 100}),
+        ("/v1/events", {"closed": "false", "tagId": 5, "limit": 100}),
+        ("/v1/events", {"closed": "false", "seriesSlug": "nba-2025", "limit": 100}),
+        ("/v1/events", {"closed": "false", "startDateMin": "2026-11-02T00:00:00Z", "limit": 100}),
+        ("/v1/events", {"closed": "false", "orderBy": "startTime", "orderDirection": "asc", "limit": 100}),
+        ("/v1/markets", {"limit": 100}),
+        ("/v1/markets", {"closed": "false", "limit": 100}),
+        ("/v1/markets", {"closed": "false", "limit": 100, "sportsMarketTypes": "moneyline"}),
+        ("/v1/markets", {"closed": "false", "limit": 100, "categories": "sports"}),
+        ("/v1/markets", {"closed": "false", "limit": 100, "tagId": 5}),
+        ("/v1/event/slug/nba-lal-pho-2026-11-15", None),
+        ("/v1/events/slug/nba-lal-pho-2026-11-15", None),
+        ("/v1/markets/aec-nba-lal-pho-2026-11-15/bbo", None),
+        ("/v1/markets/aec-nba-lal-pho-2026-11-15/book", None),
+        ("/v1/search", {"query": "Thunder"}),
+        ("/v1/search", {"query": "Ohio State"}),
+        ("/v1/search", {"query": "Sinner"}),
+    ]
+    for i, (path, params) in enumerate(probes):
+        st, body, cors = get(f"{PM}{path}", params, name=f"r2_{i:02d}.json")
+        if isinstance(body, dict):
+            for k, v in body.items():
+                if isinstance(v, list):
+                    first = v[0] if v else None
+                    log(f"   r2_{i:02d} {k}: n={len(v)} first_slug={(first or {}).get('slug') if isinstance(first, dict) else None}"
+                        f" first_start={(first or {}).get('startTime') if isinstance(first, dict) else None}")
+        time.sleep(0.2)
 
 
 def main():
     t0 = time.time()
-    for fn in (polymarket, kalshi):
+    for fn in (round2, kalshi):
         try:
             fn()
         except Exception:  # noqa: BLE001
