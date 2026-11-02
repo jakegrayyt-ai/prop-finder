@@ -79,31 +79,36 @@ def tokens(s):
     return [t for t in s.split() if t not in SUFFIX]
 
 
-def name_match(kname, pm_names):
-    """Every Kalshi token must prefix-match a Polymarket token, in order."""
-    kt = tokens(kname)
-    if not kt:
+def paren_tag(s):
+    m = re.search(r"\(([^)]*)\)", s or "")
+    return tokens(m.group(1).replace("(", "").replace(")", "")) if m else []
+
+
+def name_match(kname, school, mascot=""):
+    """Kalshi names a school/city ('Western Kentucky', 'Los Angeles C', 'Miami (FL)').
+    It must equal Polymarket's school/city exactly - 'Kentucky' never matches 'Western Kentucky'.
+    A trailing single letter is Kalshi's way of telling two teams from one city apart
+    ('Los Angeles C' = Clippers), so it must match the first letter of the mascot."""
+    kt, st = tokens(kname), tokens(school)
+    if not kt or not st:
         return False
-    for pn in pm_names:
-        pt = tokens(pn)
-        i, ok = 0, True
-        for t in kt:
-            while i < len(pt) and not pt[i].startswith(t):
-                i += 1
-            if i == len(pt):
-                ok = False
-                break
-            i += 1
-        if ok:
-            return True
+    ktag, stag = paren_tag(kname), paren_tag(school)
+    if ktag and stag and ktag != stag:
+        return False                       # Miami (FL) vs Miami (OH)
+    if kt == st:
+        return True
+    if len(kt) == len(st) + 1 and kt[:-1] == st and len(kt[-1]) == 1:
+        mt = tokens(mascot)
+        return bool(mt) and mt[0].startswith(kt[-1])
     return False
 
 
 def same_team(k_team, p_team):
     code = (k_team.get("code") or "").lower()
-    if code and code in {(p_team.get("abbr") or "").lower(), (p_team.get("disp") or "").lower()}:
+    if code and len(code) >= 3 and code in {(p_team.get("abbr") or "").lower(), (p_team.get("disp") or "").lower()}:
         return True
-    return name_match(k_team.get("name") or "", p_team.get("names") or [])
+    return any(name_match(k_team.get("name") or "", school, p_team.get("mascot") or "")
+               for school in p_team.get("schools") or [])
 
 
 # ---------------------------------------------------------------- kalshi
@@ -159,17 +164,28 @@ def kalshi_games():
                 t = f(mk.get("floor_strike"))
                 if t is not None:
                     g["total"].append((t, q))
-    out = [g for g in games.values() if len(g["teams"]) == 2]
+    today = dt.datetime.now(ET).date()
+    out = [g for g in games.values() if len(g["teams"]) == 2
+           and today - dt.timedelta(days=1) <= dt.date.fromisoformat(g["date"]) <= today + dt.timedelta(days=6)]
     log(f"kalshi: {len(out)} games " + json.dumps({lg: sum(1 for g in out if g['league'] == lg) for lg in LEAGUES}))
     return out
 
 
 # ---------------------------------------------------------------- polymarket us
-def pm_team(t):
+def pm_team(t, mascot_hint=None):
+    """Polymarket team -> its school/city part ('Western Kentucky Hilltoppers' -> 'Western Kentucky')."""
     t = t or {}
-    names = [x for x in (t.get("name"), t.get("safeName"), t.get("alias"), t.get("displayAbbreviation")) if x]
-    return {"abbr": t.get("abbreviation"), "disp": t.get("displayAbbreviation"), "names": names,
-            "name": t.get("name") or t.get("safeName") or t.get("alias")}
+    name = t.get("name") or t.get("alias") or t.get("safeName") or ""
+    mascot, schools = "", []
+    for cand in (mascot_hint, t.get("alias"), t.get("safeName")):
+        if cand and cand != name and name.lower().endswith(" " + cand.lower()):
+            mascot = cand
+            schools.append(name[: -len(cand)].strip())
+            break
+    if not schools:
+        schools.append(name)  # tennis players, or no mascot found
+    return {"abbr": t.get("abbreviation"), "disp": t.get("displayAbbreviation"), "name": name,
+            "mascot": mascot, "schools": schools, "names": [x for x in (name, t.get("alias"), t.get("safeName")) if x]}
 
 
 def pm_line(m):
@@ -205,8 +221,21 @@ def pm_games(now):
             date = dt.datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(ET).date().isoformat()
         except (AttributeError, ValueError):
             continue
+        try:
+            if dt.datetime.fromisoformat(start.replace("Z", "+00:00")) <= now + dt.timedelta(minutes=5):
+                continue  # already started: live prices move faster than this scan
+        except (AttributeError, ValueError):
+            continue
+        mascots = {}
+        for m in e.get("markets") or []:
+            if m.get("marketType") == "moneyline":
+                for sd in m.get("marketSides") or []:
+                    ab = (sd.get("team") or {}).get("abbreviation")
+                    if ab:
+                        mascots[ab] = sd.get("description")
         g = {"league": lg, "slug": e.get("slug"), "title": e.get("title"), "start": start, "date": date,
-             "teams": [pm_team(t) for t in (e.get("teams") or [])], "ml": None, "spread": [], "total": []}
+             "teams": [pm_team(t, mascots.get(t.get("abbreviation"))) for t in (e.get("teams") or [])],
+             "ml": None, "spread": [], "total": []}
         for m in e.get("markets") or []:
             if m.get("closed") or m.get("status") not in (None, "MARKET_STATUS_OPEN"):
                 continue
@@ -217,8 +246,10 @@ def pm_games(now):
             long_side = next((s for s in sides if s.get("long")), sides[0])
             short_side = next((s for s in sides if s is not long_side), sides[1])
             info = {"slug": m.get("slug"), "fee": f(m.get("feeCoefficient")) or KALSHI_TAKER, "q": q,
-                    "long": {"desc": long_side.get("description"), "team": pm_team(long_side.get("team"))},
-                    "short": {"desc": short_side.get("description"), "team": pm_team(short_side.get("team"))}}
+                    "long": {"desc": long_side.get("description"),
+                             "team": pm_team(long_side.get("team"), long_side.get("description"))},
+                    "short": {"desc": short_side.get("description"),
+                              "team": pm_team(short_side.get("team"), short_side.get("description"))}}
             if re.search(r" - [^?]+\?$", q) or "-tt-" in (m.get("slug") or ""):
                 continue  # halves, quarters, maps, team totals
             if mtype == "moneyline":
@@ -366,8 +397,8 @@ def pm_side_for_team(info, pg, team_idx):
 def combo(league, kind, line_txt, kg, pg, k_leg, p_leg, start):
     kp, kn, kside, kq, klabel = k_leg
     pp, pside, pinfo, plabel, pq = p_leg
-    if not ok(kp) or not ok(pp):
-        return None
+    if not ok(kp) or not ok(pp) or not (0.03 <= kp <= 0.97) or not (0.03 <= pp <= 0.97):
+        return None  # 1-2 cent longshots can't pay after fees and tick rounding
     kf, pf = k_fee(kp), pm_fee(pp, pinfo["fee"])
     cost = CONTRACTS * (kp + pp) + kf + pf
     per = cost / CONTRACTS
