@@ -13,6 +13,7 @@
   const SHORT = {
     pra: 'PRA', stocks: 'Stl + Blk', pass_yds: 'Pass yds', rush_yds: 'Rush yds', rec_yds: 'Rec yds',
     rush_rec_yds: 'Rush + rec yds', pass_att: 'Pass att', rush_att: 'Rush att', rec_long: 'Longest rec', rush_long: 'Longest rush',
+    ints: 'INTs', pass_tds: 'Pass TDs', tds: 'TDs', pass_cmp: 'Completions',
   };
   const BINARY = new Set(['dd', 'td3']);
   const SLUGS = {
@@ -35,7 +36,7 @@
     nhl: [['toi', 'TOI'], ['goals', 'G'], ['assists', 'A'], ['points', 'PTS'], ['sog', 'SOG'], ['saves', 'SV'], ['sa', 'SA'], ['ga', 'GA']],
   };
   const RANGES = [['l5', 'L5'], ['l10', 'L10'], ['l20', 'L20'], ['szn', 'Season'], ['prev', 'Last season'], ['h2h', 'H2H']];
-  const SHOW_FLAGS = new Set(['Live', 'Check news', 'Role change', 'Small sample', 'Wide spread']);
+  const SHOW_FLAGS = new Set(['Live', 'Check news', 'First game this season', 'Long layoff', 'Role change', 'Small sample', 'Wide spread']);
   const PAGE = 100;
 
   // ------------------------------------------------------------ state
@@ -340,7 +341,7 @@
         ${chip(r.h.l5, r.mid, 'L5')}${chip(r.h.l10, r.mid, 'L10')}${chip(r.h.l20, r.mid, 'L20', ' wide')}${chip(r.h.szn, r.mid, 'Season')}${chip(r.h.h2h, r.mid, 'H2H')}${chip(r.h[venue], r.mid, r.home ? 'Home' : 'Away')}
         <div class="c-streak" role="cell"><span class="lbl">Streak</span>${streak}</div>
       </div>
-      <div class="c-avg" role="cell">${fmtNum(r.avg10)}<small>${r.diff == null ? '' : signed(r.diff) + ' vs line'}</small></div>
+      <div class="c-avg" role="cell">${fmtNum(r.avg10)}<small title="L10 average minus the line">${r.diff == null ? '' : signed(r.diff)}</small></div>
       <div class="c-model" role="cell">${pct(r.p)}<small>market ${pct(r.mid)}</small></div>
       <div class="c-edge" role="cell">${edge}${side}</div>
     </div>`;
@@ -484,9 +485,11 @@
     html += logHTML(st.pf, r, st.stat);
     html += `<div class="cta"><a href="${esc(kalshiUrl(r.id))}" target="_blank" rel="noopener">Open on Kalshi</a></div>
       <p class="note">Prices here can be up to about 20 minutes old. Check the live price on Kalshi before you trade. If a player doesn’t play, Kalshi settles the market at a fair price instead of yes or no.</p>`;
+    const hadFocus = $('#drawer').contains(document.activeElement) || document.activeElement === document.body;
     $('#d-inner').innerHTML = html;
     renderChartOnly(gs);
     bindDrawer();
+    if (hadFocus && !$('#drawer').contains(document.activeElement)) $('#d-close').focus({ preventScroll: true });
   }
 
   function renderChartOnly(gs) {
@@ -547,6 +550,7 @@
     const slot = plotW / n;
     const bw = Math.max(3, Math.min(24, slot - 2));
     const thrY = y(line - 0.5);
+    let labels = '';
     let s = `<svg viewBox="0 0 ${width} ${H}" width="${width}" height="${H}" role="img" aria-label="${esc(statLabel(drawerState.r.lg, stat))} by game, ${vals.filter((v) => v >= line).length} of ${n} at or above ${line}">`;
     for (let t = 0; t <= ymax + 1e-9; t += step) {
       const yy = y(t);
@@ -560,7 +564,7 @@
       const yy = top + plotH - h;
       const hit = v >= line;
       s += `<g class="b" data-i="${i}"><path class="bar ${hit ? 'hit' : 'miss'}" d="${roundTop(cx - bw / 2, yy, bw, h, 4)}"/>`;
-      if (n <= 16) s += `<text class="val" x="${cx}" y="${yy - 5}" text-anchor="middle">${fmtNum(v)}</text>`;
+      if (n <= 16) labels += `<text class="val" x="${cx}" y="${yy - 5}" text-anchor="middle">${fmtNum(v)}</text>`;
       if (n <= 12) {
         s += `<text class="axis" x="${cx}" y="${H - bottom + 15}" text-anchor="middle">${g.home ? '' : '@'}${esc(g.opp)}</text>`;
         s += `<text class="axis" x="${cx}" y="${H - bottom + 29}" text-anchor="middle">${md(g.date)}</text>`;
@@ -573,7 +577,7 @@
     }
     s += `<line class="thr" x1="${left}" x2="${width - right}" y1="${thrY}" y2="${thrY}"/>`;
     s += `<text class="thr-lab" x="${left - 6}" y="${thrY + 4}" text-anchor="end">${BINARY.has(stat) ? 'Yes' : line + '+'}</text>`;
-    return s + '</svg>';
+    return s + `<g aria-hidden="true">${labels}</g></svg>`;
   }
 
   function ladderHTML(ladder, cur) {

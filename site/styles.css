@@ -96,7 +96,7 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .board { border-top: 1px solid var(--line); }
 .row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.7fr) 74px 86px 102px repeat(6, 54px) 54px 66px 62px 96px;
+  grid-template-columns: minmax(190px, 1.7fr) 84px 86px 102px repeat(6, 54px) 54px 58px 62px 96px;
   column-gap: 10px; align-items: center;
   padding: 10px 12px; border-bottom: 1px solid var(--line);
 }
@@ -121,7 +121,7 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .flag.out { background: var(--miss-wash); color: #f08aa5; }
 
 .c-prop .line { font: 700 22px/1 var(--display); display: block; font-variant-numeric: tabular-nums; }
-.c-prop .stat { color: var(--ink-2); font-size: 13px; display: block; line-height: 1.15; margin-top: 2px; }
+.c-prop .stat { color: var(--ink-2); font-size: 13px; display: block; line-height: 1.15; margin-top: 2px; overflow-wrap: anywhere; }
 .c-kalshi { display: grid; gap: 2px; font-size: 14px; font-variant-numeric: tabular-nums; }
 .c-kalshi .px b { font-weight: 600; }
 .c-kalshi .px span { color: var(--ink-3); display: inline-block; width: 26px; }
@@ -163,7 +163,7 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .foot p { margin: 0 0 8px; }
 
 @media (max-width: 1180px) {
-  .row { grid-template-columns: minmax(170px, 1.6fr) 70px 84px 102px repeat(5, 52px) 52px 60px 92px; }
+  .row { grid-template-columns: minmax(170px, 1.6fr) 80px 84px 102px repeat(5, 52px) 52px 60px 92px; }
   .c-hr.wide, .c-avg { display: none; }
 }
 
@@ -184,8 +184,11 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
   .c-hr, .c-streak { text-align: left; }
   .c-hr.wide { display: block; }
   .c-hr .lbl, .c-streak .lbl { display: block; font-size: 11px; color: var(--ink-3); margin-bottom: 2px; }
-  .hr { min-width: 52px; }
-  .c-streak { padding: 4px 6px; background: var(--surface-2); border-radius: 6px; min-width: 52px; }
+  .chips { gap: 5px; flex-wrap: nowrap; }
+  .c-hr, .c-streak { flex: 1 1 0; min-width: 0; }
+  .hr { min-width: 0; width: 100%; font-size: 14px; padding: 3px 2px; text-align: center; }
+  .c-streak { padding: 3px 2px; background: var(--surface-2); border-radius: 6px; text-align: center; }
+  .c-hr .lbl, .c-streak .lbl { text-align: center; }
   .c-model { grid-area: model; text-align: left; display: flex; align-items: baseline; gap: 6px; }
   .c-model small { display: inline; }
   .c-edge { grid-area: edge; }

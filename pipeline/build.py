@@ -152,13 +152,16 @@ def load_league(league, props, today):
         return aid, (cur or []) + (prev or [])
 
     logs = dict(pmap(logs_for, aids))
+    cur_counts = sorted(sum(1 for g in gl if g["season"] == "cur") for gl in logs.values())
+    median_cur = cur_counts[len(cur_counts) // 2] if cur_counts else 0
 
     # opponent defense vs position from this season's finished games
     table = safe(build_matchups, league, cur_season, today, pos_of, default=None, label="matchups")
     inj = safe(espn.injuries, league, default={}, label="injuries") or {}
     roster_by_id = {a["id"]: a for a in athletes}
     return {"league": league, "matched": matched, "unmatched": dict(unmatched), "logs": logs, "games": games,
-            "table": table, "inj": inj, "athletes": roster_by_id, "teams": team_by_id, "lg_total": lg_total}
+            "table": table, "inj": inj, "athletes": roster_by_id, "teams": team_by_id, "lg_total": lg_total,
+            "median_cur": median_cur}
 
 
 def build_matchups(league, season, today, pos_of):
@@ -267,6 +270,10 @@ def evaluate(p, L):
     if vol and vol["szn"] and abs(vol["l3"] - vol["szn"]) / max(vol["szn"], 1) > 0.25:
         flags.append("Role change")
     n_cur, n_prev = len(cur_vals), len(prev_vals)
+    if n_cur == 0 and L.get("median_cur", 0) >= 3:
+        flags.append("First game this season")
+    elif rest is not None and rest > 25:
+        flags.append("Long layoff")
     n_eff = n_cur + 0.5 * min(n_prev, 40)
     lo, hi = (5, 10) if league == "nfl" else (10, 25)
     conf = 1 if n_eff < lo else (3 if (n_cur >= (5 if league == "nfl" else 8) and n_eff >= hi) else 2)
@@ -274,6 +281,8 @@ def evaluate(p, L):
         flags.append("Small sample")
     if any(f in flags for f in ("Questionable", "Doubtful", "Day-To-Day", "Wide spread", "Role change", "Live")):
         conf -= 1
+    if "First game this season" in flags or "Long layoff" in flags:
+        conf = min(conf, 1)
     if status in OUT_STATUS:
         conf = 0
     gap = (p_model - mid) if (p_model is not None and mid is not None) else None
