@@ -296,20 +296,25 @@ def k_event_date(ev):
         return None
 
 
-def kalshi_games():
-    base = K.BASES[0]
-    games = {}
-
-    def fetch(series):
+def k_fetch(series):
+    """One Kalshi series, retried after a pause if Kalshi rate-limits us (HTTP 429)."""
+    for attempt in range(3):
         try:
-            return series, K.fetch_series(base, series)
+            return series, K.fetch_series(K.BASES[0], series)
         except Exception as e:  # noqa: BLE001
-            log(f"kalshi {series} failed: {e!r}"[:200])
-            return series, []
+            if attempt == 2:
+                log(f"kalshi {series} failed: {e!r}"[:200])
+            time.sleep(4 * (attempt + 1))
+    return series, []
+
+
+def kalshi_games():
+    games = {}
+    fetch = k_fetch
 
     kinds = ("game", "spread", "total", "btts", "spread1h", "total1h", "teamtotal")
     all_series = [(lg, kind, s) for lg, c in LEAGUES.items() for kind in kinds for s in c[kind]]
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:
         fetched = dict(ex.map(fetch, [s for _, _, s in all_series]))
     for lg, kind, s in all_series:
         for mk in fetched.get(s, []):
@@ -659,8 +664,37 @@ def fill_price(book, side, qty=MIN_QTY):
     return None, cum
 
 
-def reprice(o, pp):
-    """Re-do a pair's math with a new Polymarket price."""
+def k_book(ticker):
+    """Kalshi order book as (yes bids, no bids) [(price, qty)], or None."""
+    try:
+        ob = get_json(f"{K.BASES[0]}/markets/{ticker}/orderbook").get("orderbook") or {}
+    except Exception:  # noqa: BLE001
+        return None
+
+    def lv(dollars, cents):
+        if ob.get(dollars):
+            return [(f(p), f(q)) for p, q in ob[dollars] if f(p) and f(q)]
+        return [(f(p) / 100, f(q)) for p, q in ob.get(cents) or [] if f(p) and f(q)]
+    return lv("yes_dollars", "yes"), lv("no_dollars", "no")
+
+
+def k_fill(book, side, qty=MIN_QTY):
+    """Cost of `qty` Kalshi contracts on `side`: buying Yes takes the best No bids (and the other way round)."""
+    yes_bids, no_bids = book
+    levels = sorted(no_bids if side == "yes" else yes_bids, key=lambda x: -x[0])
+    cum = 0.0
+    for px, q in levels:
+        cum += q
+        if cum >= qty - 1e-9:
+            return round(1 - px, 4), sum(q2 for px2, q2 in levels if px2 >= px - 1e-9)
+    return None, cum
+
+
+def reprice(o, pp=None, kp=None):
+    """Re-do a pair's math with a new Polymarket and/or Kalshi price."""
+    if kp is not None:
+        o["k"].update({"price": round(kp, 4), "fee100": k_fee(kp)})
+    pp = o["p"]["price"] if pp is None else pp
     kp = o["k"]["price"]
     pf = pm_fee(pp, o["p"]["fee_coef"])
     cost = CONTRACTS * (kp + pp) + o["k"]["fee100"] + pf
@@ -795,19 +829,10 @@ PROP_NOTE = ("If the player doesn't play, the two sites can settle this differen
 
 def kalshi_props(want):
     """Kalshi player props for the matched games: (league, game key) -> [prop]."""
-    base = K.BASES[0]
     series = [s for s, (lg, stat, _) in K.SERIES.items() if (lg, stat) in PROP_PM and lg in {k[0] for k in want}]
-
-    def fetch(s):
-        try:
-            return s, K.fetch_series(base, s)
-        except Exception as e:  # noqa: BLE001
-            log(f"kalshi {s} failed: {e!r}"[:200])
-            return s, []
-
     out = defaultdict(list)
     with ThreadPoolExecutor(max_workers=4) as ex:
-        for s, mks in ex.map(fetch, series):
+        for s, mks in ex.map(k_fetch, series):
             lg, stat, label = K.SERIES[s]
             for mk in mks:
                 if mk.get("status") not in ("active", "open", None):
@@ -1162,9 +1187,9 @@ def main():
         opps = evaluate(pairs, quotes)
         # Real prices on the Polymarket side: the best bid or ask is often a dust order (0.01 of a contract) that
         # can't be traded, so walk each candidate's book to what 1 contract actually costs, and how many are there.
-        cand = opps[:400]
+        cand = opps[:900]
         slugs_c = list(dict.fromkeys(o["p"]["slug"] for o in cand))
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=6) as ex:
             books = dict(zip(slugs_c, ex.map(pm_book, slugs_c)))
         dust = 0
         for o in cand:
@@ -1180,9 +1205,24 @@ def main():
                 dust += 1
                 reprice(o, px)
             o["p"]["size"] = size
+        # the same on Kalshi's side, for the few whose best price has less than 1 contract behind it
+        kd = [o for o in cand if not o.get("drop") and o["k"].get("size") is not None and o["k"]["size"] < MIN_QTY]
+        tick = list(dict.fromkeys(o["k"]["ticker"] for o in kd))
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            kbooks = dict(zip(tick, ex.map(k_book, tick)))
+        for o in kd:
+            book = kbooks.get(o["k"]["ticker"])
+            px, size = k_fill(book, o["k"]["side"]) if book else (None, None)
+            if px is None:
+                o["drop"] = True
+                continue
+            if px > o["k"]["price"] + 1e-9:
+                reprice(o, kp=px)
+            o["k"]["size"] = size
         thin = sum(1 for o in cand if o.get("drop"))
-        opps = sorted([o for o in cand if o["per"] <= WATCH_MAX and not o.get("drop")], key=lambda o: o["per"]) + opps[400:]
-        log(f"book check: {len(cand)} pairs, {dust} repriced past dust at the top of the book, {thin} dropped (under 1 contract)")
+        opps = sorted([o for o in cand if o["per"] <= WATCH_MAX and not o.get("drop")], key=lambda o: o["per"])
+        log(f"book check: {len(cand)} pairs, {dust} repriced past Polymarket dust, {len(kd)} Kalshi dust checks, "
+            f"{thin} dropped (under 1 contract), {sum(1 for o in cand if o['p'].get('size') is None)} without a book")
         top = opps[:200]
         counts = {}
         for lg in LEAGUES:

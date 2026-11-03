@@ -18,11 +18,22 @@ A GitHub Actions job (`.github/workflows/update.yml`) is scheduled every 10 minu
 
 **https://jakegrayyt-ai.github.io/prop-finder/arb.html**
 
-Every scan, `pipeline/arb.py` lists the next 6 days of NFL, NBA, NHL, college football, men's college basketball and ATP/WTA tennis games on both **Kalshi** and **Polymarket US** (the US-regulated app, not polymarket.com). It matches the same game on both sites by date and exact school or city name, so Kentucky never pairs with Western Kentucky. Then it prices every pair of opposite bets:
+Every scan, `pipeline/arb.py` lists the next 6 days of games on both **Kalshi** and **Polymarket US** (the US-regulated app, not polymarket.com), for every sport both sites list:
 
-- Moneyline: Team A on one site + Team B on the other
-- Spread: Team A −X on one site + Team B +X on the other (the same X only)
-- Total: Over T on one site + Under T on the other (the same T only)
+- NFL, NBA, NHL, college football, men's and women's college basketball
+- About 50 soccer leagues (Champions League, Premier League, La Liga, Serie A, Bundesliga, Ligue 1, MLS, Brasileirão and many smaller ones)
+- ATP, WTA, ITF and doubles tennis, UFC and boxing
+- Esports (CS2, Dota 2, League of Legends, Rainbow Six)
+- Basketball, hockey, baseball and cricket leagues outside the US (EuroLeague, CBA, KHL, AHL, KBO and others)
+
+It matches the same game on both sites by date and team or player names. US teams must match their school or city exactly, so Kentucky never pairs with Western Kentucky. Clubs abroad match on their distinctive words ("Everton" = "Everton FC"), and both teams have to match. Then it prices every pair of opposite bets:
+
+- Moneyline: Team A on one site + Team B on the other. Soccer is win, draw or win on both sites, so each outcome is paired with its own opposite (Arsenal wins on one site, Arsenal doesn't win on the other)
+- Spread and total, for the full game and the first half: Team A −X + Team B +X, Over T + Under T (the same X or T only)
+- Team totals, both teams to score
+- NBA, NFL and NHL player props: Kalshi's "Jaylen Brown: 25+ points" against Polymarket's "at least 25 points". If the player doesn't play, the sites may settle differently
+
+Polymarket's best bid or ask is often a dust order (a hundredth of a contract) that can't be traded, so each candidate is priced at what 1 full contract costs on the real order book, and pairs without 1 contract are dropped.
 
 A pair is an **arbitrage** when both prices plus both taker fees come to less than $1 per contract. Kalshi's fee is 0.07 × price × (1 − price). Polymarket US lists a fee rate on each market (0.0695 right now), applied the same way. Both round up per order. Games Polymarket US marks as live (or that start within 10 minutes) are skipped, and so are 1–2¢ longshots.
 
