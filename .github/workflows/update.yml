@@ -3,7 +3,7 @@ name: update
 # Pulls Kalshi props + ESPN stats and Kalshi vs Polymarket US game prices, then publishes the site.
 on:
   schedule:
-    - cron: "2,12,22,32,42,52 * * * *"   # about every 10 minutes
+    - cron: "2,12,22,32,42,52 * * * *"   # every 10 minutes when GitHub has room (often 10-60 in practice)
   workflow_dispatch:
   push:
     branches: [main]
@@ -71,7 +71,7 @@ jobs:
           git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages:gh-pages
 
       # GitHub pauses scheduled jobs in public repos after 60 days without a commit.
-      # One tiny commit a month keeps the 20-minute updates running indefinitely.
+      # One tiny commit a month keeps the scheduled updates running indefinitely.
       - name: Keep the schedule alive
         if: github.event_name == 'schedule'
         continue-on-error: true

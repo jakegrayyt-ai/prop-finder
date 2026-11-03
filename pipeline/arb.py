@@ -269,6 +269,53 @@ def pm_markets_by_slug(slugs, chunk=80):
     return out
 
 
+def ts(s):
+    try:
+        return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+
+
+START_BUFFER = dt.timedelta(minutes=10)
+SCHED_RE = re.compile(r"scheduled for ([A-Z][a-z]+ \d{1,2}, \d{4}) at (\d{1,2}:\d{2} [AP]M) UTC")
+
+
+def pm_skip_reason(e, now):
+    """Why a Polymarket US event is no longer a pre-game market (None if it still is).
+
+    Polymarket US marks games in progress with live=true and a period ("H1", "Q3", "S2"...);
+    "NS" means not started. Its start times for tennis are estimates, so the live flag matters most there."""
+    if e.get("ended"):
+        return "over"
+    if e.get("live"):
+        return "live"
+    period = (e.get("period") or "").strip()
+    if period and period != "NS":
+        return "live"
+    if re.search(r"[1-9]", e.get("score") or ""):     # "0-0" before the start; "6-3, 2-1:15-0" once it's on
+        return "live"
+    start = ts(e.get("startTime") or e.get("startDate"))
+    if start is None:
+        return "no start time"
+    if start <= now + START_BUFFER:
+        return "starting"   # live prices move faster than this scan runs
+    return None
+
+
+def pm_sched(question):
+    """The original schedule in Polymarket's question text ('... scheduled for November 2, 2026 at 9:30 AM UTC?')."""
+    m = SCHED_RE.search(question or "")
+    if not m:
+        return None
+    try:
+        return dt.datetime.strptime(f"{m.group(1)} {m.group(2)}", "%B %d, %Y %I:%M %p").replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return None
+
+
+SKIPPED = defaultdict(int)
+
+
 def pm_games(now):
     lo = (now - dt.timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
     hi = (now + dt.timedelta(days=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -287,14 +334,13 @@ def pm_games(now):
     games = []
     for lg, e in events:
         start = e.get("startTime") or e.get("startDate")
-        try:
-            date = dt.datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(ET).date().isoformat()
-        except (AttributeError, ValueError):
+        st = ts(start)
+        if st is None:
             continue
-        try:
-            if dt.datetime.fromisoformat(start.replace("Z", "+00:00")) <= now + dt.timedelta(minutes=5):
-                continue  # already started: live prices move faster than this scan
-        except (AttributeError, ValueError):
+        date = st.astimezone(ET).date().isoformat()
+        why = pm_skip_reason(e, now)
+        if why:
+            SKIPPED[why] += 1
             continue
         mascots = {}
         for m in e.get("markets") or []:
@@ -305,7 +351,7 @@ def pm_games(now):
                         mascots[ab] = sd.get("description")
         g = {"league": lg, "slug": e.get("slug"), "title": e.get("title"), "start": start, "date": date,
              "teams": [pm_team(t, mascots.get(t.get("abbreviation"))) for t in (e.get("teams") or [])],
-             "ml": None, "spread": [], "total": []}
+             "ml": None, "spread": [], "total": [], "moved_from": None}
         for m in e.get("markets") or []:
             if m.get("marketType") == "moneyline":
                 info = pm_info(m)
@@ -313,9 +359,13 @@ def pm_games(now):
                     g["ml"] = info
                     if not g["teams"]:
                         g["teams"] = [info["long"]["team"], info["short"]["team"]]
+                    sched = pm_sched(m.get("question"))
+                    if sched and abs((sched - st).total_seconds()) >= 2 * 3600:
+                        g["moved_from"] = sched.isoformat().replace("+00:00", "Z")  # rain delay, new order of play...
         if g["ml"] or g["spread"] or g["total"]:
             games.append(g)
-    log(f"polymarket: {len(games)} games " + json.dumps({lg: sum(1 for g in games if g['league'] == lg) for lg in LEAGUES}))
+    log(f"polymarket: {len(games)} pre-game games " + json.dumps({lg: sum(1 for g in games if g['league'] == lg) for lg in LEAGUES})
+        + f"; skipped {json.dumps(SKIPPED)}")
     return games
 
 
@@ -456,6 +506,7 @@ def combo(league, kind, line_txt, kg, pg, k_leg, p_leg, start):
         return None
     return {
         "lg": league, "kind": kind, "line": line_txt, "date": kg["date"], "start": start,
+        "moved_from": pg.get("moved_from"), "event": pg.get("slug"),
         "game": pg.get("title") or " vs ".join(kg["teams"].values()),
         "k": {"label": klabel, "side": kside, "price": round(kp, 4), "fee100": kf, "size": kn,
               "ticker": kq["ticker"], "title": kq.get("title"), "url": K.market_url(kq["series"], kq["event"])},
@@ -558,6 +609,7 @@ def main():
     result = {"updated": now.isoformat(timespec="seconds"), "ok": False, "opps": [], "counts": {}}
     try:
         kgames = kalshi_games()
+        k_at = dt.datetime.now(dt.timezone.utc)
         pgames = pm_games(now)
         pairs, unmatched = match(kgames, pgames)
 
@@ -574,6 +626,7 @@ def main():
             for t in sorted({t for t, q in kg["total"] if live(q)}):
                 want.append(f"tsc-{base}-{slug_num(t)}")
         markets = pm_markets_by_slug(want)
+        result["p_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
         quotes = {}
         for kg, pg, _ in pairs:
             base = pg["slug"]
@@ -610,7 +663,8 @@ def main():
                           "matched": sum(1 for kg, _, _ in pairs if kg["league"] == lg)}
         result.update({"ok": True, "opps": top, "counts": counts, "n_arbs": sum(1 for o in opps if o["per"] < 1),
                        "n_close": len(opps), "checked": {k: v["pairs"] for k, v in STATS.items()},
-                       "best": {k: v["best"] for k, v in STATS.items()}, "secs": round(time.time() - t0, 1)})
+                       "best": {k: v["best"] for k, v in STATS.items()}, "secs": round(time.time() - t0, 1),
+                       "k_at": k_at.isoformat(timespec="seconds"), "skipped": dict(SKIPPED)})
         log(f"arb: {len(pairs)} matched games, {result['n_arbs']} arbs, {len(opps)} within ${WATCH_MAX:.2f}")
         pm_sp = sum(len(pg["spread"]) for _, pg, _ in pairs)
         pm_to = sum(len(pg["total"]) for _, pg, _ in pairs)

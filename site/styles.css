@@ -341,7 +341,14 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .leg .meta2 { margin: 0; color: var(--ink-3); font-size: 12px; }
 .leg .go { font-size: 13px; font-weight: 600; margin-top: 2px; }
 .leg .go.muted { color: var(--ink-3); font-weight: 500; margin: 2px 0 0; }
-.livetag { font-size: 11px; color: var(--hit); background: var(--hit-wash); border-radius: 4px; padding: 0 5px; margin-left: 4px; }
+.leg .meta2.old { color: var(--warn); }
+.arb.is-maybe { border-color: var(--warn); box-shadow: inset 4px 0 0 var(--warn); }
+.arb.is-gone { opacity: .6; }
+.res.warn { color: var(--warn); }
+.arb-summary .lead b.warn { color: var(--warn); }
+.arb-summary .stale-note { color: var(--warn); margin-bottom: 6px; }
+.arb-summary .stale-note a { color: var(--warn); }
+.why { margin: 8px 0 0; padding: 8px 12px 8px 28px; background: var(--warn-wash); border-radius: 8px; color: var(--ink); font-size: 13px; display: grid; gap: 3px; }
 .arb-math { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-top: 12px; }
 .arb-math .tot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; color: var(--ink-3); font-size: 13px; }
 .arb-math .tot b { font: 700 22px/1 var(--display); color: var(--ink); font-variant-numeric: tabular-nums; }

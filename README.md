@@ -6,7 +6,7 @@ A research board for **Kalshi player props** in the NBA, NFL and NHL. For every 
 
 ## How it works
 
-A GitHub Actions job (`.github/workflows/update.yml`) runs about every 10 minutes:
+A GitHub Actions job (`.github/workflows/update.yml`) is scheduled every 10 minutes. GitHub runs scheduled jobs when it has room, so in practice updates land every 10 to 60 minutes:
 
 1. **Kalshi** (public market data, no account or API key). It reads every open market in the standard player-prop series: NBA points, rebounds, assists, threes, PRA, steals, blocks, steals + blocks, double-doubles and triple-doubles. NFL passing, rushing and receiving yards, receptions, touchdowns, passing TDs, completions, attempts, interceptions and longest plays. NHL goals, points, assists and goalie saves.
 2. **ESPN** (public JSON, also one of Kalshi's settlement sources). It pulls rosters, schedules with betting totals, injury reports, each player's game log for this season and last season, and every finished box score this season. The box scores feed the opponent-defense numbers.
@@ -18,13 +18,15 @@ A GitHub Actions job (`.github/workflows/update.yml`) runs about every 10 minute
 
 **https://jakegrayyt-ai.github.io/prop-finder/arb.html**
 
-Every scan (about every 10 minutes), `pipeline/arb.py` lists the next 6 days of NFL, NBA, NHL, college football, men's college basketball and ATP/WTA tennis games on both **Kalshi** and **Polymarket US** (the US-regulated app, not polymarket.com). It matches the same game on both sites by date and exact school or city name, so Kentucky never pairs with Western Kentucky. Then it prices every pair of opposite bets:
+Every scan, `pipeline/arb.py` lists the next 6 days of NFL, NBA, NHL, college football, men's college basketball and ATP/WTA tennis games on both **Kalshi** and **Polymarket US** (the US-regulated app, not polymarket.com). It matches the same game on both sites by date and exact school or city name, so Kentucky never pairs with Western Kentucky. Then it prices every pair of opposite bets:
 
 - Moneyline: Team A on one site + Team B on the other
 - Spread: Team A −X on one site + Team B +X on the other (the same X only)
 - Total: Over T on one site + Under T on the other (the same T only)
 
-A pair is an **arbitrage** when both prices plus both taker fees come to less than $1 per contract. Kalshi's fee is 0.07 × price × (1 − price). Polymarket US lists a fee rate on each market (0.0695 right now), applied the same way. Both round up per order. Games that have started are skipped, and so are 1–2¢ longshots. The page re-checks Polymarket US prices live every 30 seconds (its API allows that from a browser). Kalshi's API doesn't, so Kalshi prices come from the last scan.
+A pair is an **arbitrage** when both prices plus both taker fees come to less than $1 per contract. Kalshi's fee is 0.07 × price × (1 − price). Polymarket US lists a fee rate on each market (0.0695 right now), applied the same way. Both round up per order. Games Polymarket US marks as live (or that start within 10 minutes) are skipped, and so are 1–2¢ longshots.
+
+The page re-checks Polymarket US prices every 30 seconds (its API allows that from a browser). Kalshi's API refuses requests from other websites, so Kalshi prices come from the last scan. Because of that, a newer Polymarket price is only allowed to make a pair look worse, never better: if Polymarket moved, Kalshi probably did too. A pair is shown as arbitrage only when Kalshi's price is under 15 minutes old, Polymarket hasn't moved 2¢ or more since the scan, and there's at least 1 contract on each side. Otherwise it's marked *re-check* with the reason. Cards disappear 2 minutes before the start (20 minutes for tennis, whose start times are estimates).
 
 Real arbitrage is rare. The two sites usually agree within a few cents, and the combined fee is about 3¢ at even odds. Before trading, check both live prices, the available size, and both sites' rules (NFL ties, tennis retirements and postponements can settle differently).
 
@@ -45,7 +47,7 @@ Hit rates are colored **against the price**, not against 50%. A 60% hit rate on 
 
 ## Honest limits
 
-- The data refreshes about every 10 minutes. Always check the live price on Kalshi before trading.
+- The data refreshes every 10 to 60 minutes, depending on GitHub's scheduler. The time of the last update is at the top of each page. Always check the live price on Kalshi before trading.
 - The model only knows box scores. It doesn't know about an injured teammate, a new starter or a blowout risk. Kalshi's traders often do.
 - Small samples (early season, rookies, players who changed teams) are noisy. Those props are marked low confidence.
 - If a player doesn't play, Kalshi settles the market at a fair price instead of Yes or No.

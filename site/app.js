@@ -85,9 +85,12 @@
     return p;
   }
 
+  // ESPN's state is from the last update; a game whose start time has passed since then is live too.
+  const isLive = (G) => !!G && (G.state === 'in' || (G.state !== 'post' && !!G.start && Date.parse(G.start) <= Date.now()));
+
   function fmtWhen(G) {
     if (!G || !G.start) return '';
-    if (G.state === 'in') return 'Live now';
+    if (isLive(G)) return 'Live now';
     const d = new Date(G.start);
     const now = new Date();
     const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -237,7 +240,7 @@
       case 'streak': return r.strk ?? -99;
       case 'volume': return r.k.vol || 0;
       case 'time': return -r.t;
-      default: return r.be ?? -9;
+      default: return isLive(r.G) ? -8 : r.be ?? -9;   // a pre-game edge means nothing once the game is on
     }
   }
 
@@ -326,10 +329,10 @@
     const venue = r.home ? 'home' : 'away';
     const st = r.strk || 0;
     const streak = st ? `<span class="${st > 0 ? 'up' : 'down'}">${st > 0 ? '+' : '−'}${Math.abs(st)}</span>` : '0';
-    const live = G.state === 'in';
+    const live = isLive(G);
     const edge = live ? '<span class="edge live">Live</span>' : r.be == null ? '<span class="edge neg">—</span>'
       : `<span class="edge ${r.be > 0 ? 'pos' : 'neg'}">${signed(r.be * 100)}¢</span>`;
-    const side = r.best ? `<span class="side">${r.best === 'yes' ? 'Buy yes' : 'Buy no'} ${confHTML(r.conf)}</span>` : '';
+    const side = r.best && !live ? `<span class="side">${r.best === 'yes' ? 'Buy yes' : 'Buy no'} ${confHTML(r.conf)}</span>` : '';
     const dim = r.conf === 'low' ? ' dim' : '';
     return `<div class="row prop-row${dim}" role="row" tabindex="0" data-id="${esc(r.id)}" aria-label="${esc(P.name)} ${r.line}+ ${esc(r.label)}">
       <div class="c-player" role="cell"><span class="pname">${esc(P.name)}</span>
@@ -484,7 +487,7 @@
     html += contextHTML(r, st.pf);
     html += logHTML(st.pf, r, st.stat);
     html += `<div class="cta"><a href="${esc(kalshiUrl(r.id))}" target="_blank" rel="noopener">Open on Kalshi</a></div>
-      <p class="note">Prices here can be up to about 10 minutes old. Check the live price on Kalshi before you trade. If a player doesn’t play, Kalshi settles the market at a fair price instead of yes or no.</p>`;
+      <p class="note">${isLive(G) ? 'This game has started, so these prices and the edge are from before the start and don’t apply now. ' : ''}Prices here are from the last update, ${esc(ago(D.updated))}. Check the live price on Kalshi before you trade. If a player doesn’t play, Kalshi settles the market at a fair price instead of yes or no.</p>`;
     const hadFocus = $('#drawer').contains(document.activeElement) || document.activeElement === document.body;
     $('#d-inner').innerHTML = html;
     renderChartOnly(gs);
