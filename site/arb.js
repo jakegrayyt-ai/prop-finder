@@ -48,8 +48,9 @@
   }
 
   const kAgeMin = () => (Date.now() - D.kAt) / 60000;
+  // null = unknown. 0 is real: the live Polymarket book has nothing left at this price.
   const minSize = (o) => {
-    const s = [o.k.size, o.p.size].filter((x) => x != null && x > 0);
+    const s = [o.k.size, o.p.size].filter((x) => x != null && Number.isFinite(x));
     return s.length ? Math.min(...s) : null;
   };
 
@@ -68,7 +69,8 @@
       why.push(`Polymarket has moved ${cents(Math.abs(o.p.move))} since the scan, so Kalshi has probably moved too.`);
     }
     const n = minSize(o);
-    if (n != null && n < 1) why.push('Less than 1 contract is available at one of these prices.');
+    if (n != null && n <= 0) why.push('Nothing is left at one of these prices right now.');
+    else if (n != null && n < 1) why.push('Less than 1 contract is available at one of these prices.');
     return { s: why.length ? 'maybe' : 'arb', why };
   }
 
@@ -95,8 +97,9 @@
     return mins < 1 ? 'just now' : mins < 60 ? `${mins} min ago` : `${Math.floor(mins / 60)} hr ${mins % 60} min ago`;
   }
 
-  const sizeTxt = (n, live) => (n == null || n <= 0 ? 'Size unknown'
-    : n < 1 ? 'Less than 1 contract available'
+  const sizeTxt = (n, live) => (n == null || !Number.isFinite(n) ? 'Size unknown'
+    : n <= 0 ? 'Nothing left at this price'
+      : n < 1 ? 'Less than 1 contract available'
       : `${Math.floor(n).toLocaleString()} available${live ? '' : ' at the scan'}`);
   const kindTxt = (o) => (o.kind === 'Moneyline' ? 'Moneyline' : `${o.kind} ${o.line}`);
 
