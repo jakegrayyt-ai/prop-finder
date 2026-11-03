@@ -181,6 +181,8 @@ def load_league(league, props, today):
     hurt = 0
     for aid, tid in aids:
         ath = roster_by_id.get(aid) or {}
+        if league == "nhl" and ath.get("pos") == "G":
+            continue      # goalies sit by design (backup nights) and get pulled when shelled: neither is an injury
         hurt += injury.mark(league, logs.get(aid) or [], team_games.get(tid), aid, inj.get(aid),
                             qb=(ath.get("pos") == "QB"), team_abbr=(team_by_id.get(tid) or {}).get("abbr"))
     log(f"{league}: {hurt} games marked as left early hurt")
@@ -302,7 +304,7 @@ def evaluate(p, L):
     if vol and vol["szn"] and abs(vol["l3"] - vol["szn"]) / max(vol["szn"], 1) > 0.25:
         flags.append("Role change")
     n_cur, n_prev = len(cur_vals), len(prev_vals)
-    missed = injury.missed_since((L.get("team_games") or {}).get(p["team_id"]), p["aid"], g["date"], played_all)
+    missed = 0 if grp == "G" else injury.missed_since((L.get("team_games") or {}).get(p["team_id"]), p["aid"], g["date"], played_all)
     if missed and not (status in OUT_STATUS):
         flags.append(f"Missed last {missed} game{'s' if missed != 1 else ''}")
     if played_all and injury.is_hurt(played_all[0]):
