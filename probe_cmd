@@ -1,2 +1,9 @@
 set -e
-python -m pipeline.probe_sports
+export PROP_OUT=debug
+mkdir -p debug/p
+python -m pipeline.build
+cp -r site/index.html site/app.js site/styles.css debug/
+rm -rf debug/p_keep && mkdir -p debug/p_keep
+# keep the debug branch small: only the files for other sports plus a few core ones
+find debug/p -name '*-t-*' -o -name '*-g-*' | head -400 | xargs -I{} cp {} debug/p_keep/ 2>/dev/null || true
+rm -rf debug/p && mv debug/p_keep debug/p
