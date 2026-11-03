@@ -65,9 +65,9 @@ def r2(x, n=3):
 def load_league(league, props, today, tmk=()):
     """Everything ESPN-side for one league. tmk: Kalshi team markets (their games need schedules too)."""
     cur_season, prev_season = espn.season_years(league, today)
-    teams = espn.teams(league)
-    team_by_id = {t["id"]: t for t in teams}
-    rosters = pmap(lambda t: safe(espn.roster, league, t, default=[], label="roster"), teams)
+    team_list = espn.teams(league)       # (not `teams`: that's the team-bets module)
+    team_by_id = {t["id"]: t for t in team_list}
+    rosters = pmap(lambda t: safe(espn.roster, league, t, default=[], label="roster"), team_list)
     athletes = [a for r in rosters for a in r]
     by_name, by_initial = defaultdict(list), defaultdict(list)
     for a in athletes:
@@ -146,7 +146,7 @@ def load_league(league, props, today, tmk=()):
 
     logs = dict(pmap(logs_for, aids))
     # All-Star games and exhibitions against teams outside the league aren't real games for a prop
-    abbrs = {t.get("abbr") for t in teams if t.get("abbr")}
+    abbrs = {t.get("abbr") for t in team_list if t.get("abbr")}
     alias = TEAM_ALIASES.get(league, {})
 
     def in_league(opp):
@@ -171,7 +171,7 @@ def load_league(league, props, today, tmk=()):
     done = list(done) + [g for g in games.values() if g["completed"] and g.get("season_type") in (2, 3)]
     prev_games = []
     if tmk:   # team bets also look at last season's results
-        for sched_ in pmap(lambda t: safe(espn.team_schedule, league, t["id"], prev_season, default=[], label="team-sched"), teams):
+        for sched_ in pmap(lambda t: safe(espn.team_schedule, league, t["id"], prev_season, default=[], label="team-sched"), team_list):
             prev_games.extend(sched_ or [])
     inj = safe(espn.injuries, league, default={}, label="injuries") or {}
     roster_by_id = {a["id"]: a for a in athletes}

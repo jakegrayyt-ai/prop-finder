@@ -164,7 +164,10 @@
       r.short = SHORT[r.stat] || r.label;
       r.k.na = r.k.yb != null && r.k.yb > 0 ? Math.round((1 - r.k.yb) * 100) / 100 : null;
       r.k.nb = r.k.ya != null && r.k.ya < 1 ? Math.round((1 - r.k.ya) * 100) / 100 : null;
-      r._q = norm(`${r.P.name} ${r.P.team || ''} ${r.opp || ''}` + (isTeam(r) ? ` ${r.G.home_name || ''} ${r.G.away_name || ''} ${r.G.home || ''} ${r.G.away || ''}` : ''));
+      // search matches the player or team, its full team name, and the opponent's abbreviation
+      const full = r.kind === 'game' ? `${r.G.home_name || ''} ${r.G.away_name || ''} ${r.G.home || ''} ${r.G.away || ''}`
+        : (r.home ? r.G.home_name : r.G.away_name) || '';
+      r._q = norm(`${r.P.name} ${r.P.team || ''} ${r.opp || ''} ${full}`);
       r.t = Date.parse(r.G.start) || 0;
       byId.set(r.id, r);
     }
@@ -702,7 +705,7 @@
   function meansHTML(r) {
     const t = esc(teamName(r)), u = UNIT[r.lg], G = r.G;
     const other = r.home ? G.away : G.home;
-    if (r.stat === 'win') return `<b>Yes</b> if the ${t} win, overtime included. <b>No</b> if they lose.`;
+    if (r.stat === 'win') return `<b>Yes</b> if the ${t} win, overtime included. <b>No</b> if they lose.${r.lg === 'nfl' ? ' A tie pays 50¢ either way.' : ''}`;
     if (r.stat === 'margin') return `<b>Yes</b> if the ${t} win by ${r.line} or more (−${half(r.line)}). <b>No</b> if they lose or win by ${r.line - 1} or less, the same as ${esc(other || 'the other team')} +${half(r.line)}.`;
     if (r.stat === 'tpts') return `<b>Yes</b> if the ${t} score ${r.line} or more ${u} (over ${half(r.line)}). <b>No</b> if they score ${r.line - 1} or fewer.`;
     return `<b>Yes</b> if both teams score ${r.line} or more ${u} combined (over ${half(r.line)}). <b>No</b> if ${r.line - 1} or fewer.`;
@@ -761,7 +764,7 @@
       const list = (t) => {
         const xs = inj[t] || [];
         if (!xs.length) return '<p class="note">Nobody listed.</p>';
-        return `<ul class="injl">${xs.map((x) => `<li class="${x.key ? 'key' : ''}"><span><b>${esc(x.name)}</b> ${esc(x.pos || '')}${x.key ? ' <span class="flag inj">Key player</span>' : ''}<small>${esc(x.use)}${x.missed ? `, missed the last ${x.missed === 1 ? 'game' : x.missed + ' games'}` : ''}</small></span>` +
+        return `<ul class="injl">${xs.map((x) => `<li class="${x.key ? 'is-key' : ''}"><span><b>${esc(x.name)}</b> ${esc(x.pos || '')}${x.key ? ' <span class="flag inj">Key player</span>' : ''}<small>${esc(x.use)}${x.missed ? `, missed the last ${x.missed === 1 ? 'game' : x.missed + ' games'}` : ''}</small></span>` +
           `<span class="st ${x.out ? 'out' : ''}">${esc(x.status)}${x.type ? `<small>${esc(x.type)}</small>` : ''}</span></li>`).join('')}</ul>`;
       };
       html += `<div class="sec"><h3>Injury report</h3><div class="injt">${teams.map((t) => `<div><h4>${esc(t)}</h4>${list(t)}</div>`).join('')}</div>

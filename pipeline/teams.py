@@ -28,6 +28,7 @@ SD = {"nba": {"tpts": 11.5, "margin": 13.0, "total": 18.5},   # game-to-game spr
       "nfl": {"tpts": 9.8, "margin": 13.5, "total": 14.0}}
 UNIT = {"nba": "points", "nfl": "points", "nhl": "goals"}
 MIN_PRICE = 0.04          # ladder lines priced under 4c or over 96c are left off (nobody trades them)
+MAX_SPREAD = 0.30         # and so are markets without a real two-sided book yet
 OUT = {"Out", "Injured Reserve", "Suspension", "Doubtful"}
 SEVERITY = {"Out": 0, "Suspension": 0, "Injured Reserve": 1, "Doubtful": 2, "Questionable": 3, "Day-To-Day": 4}
 
@@ -211,7 +212,7 @@ def usage_line(league, u, pos):
         return f"{u.get('rush_att', 0):.0f} carries, {u.get('targets', 0):.1f} targets a game in {n}"
     if p in ("WR", "TE"):
         return f"{u.get('targets', 0):.1f} targets, {u.get('rec_yds', 0):.0f} yds a game in {n}"
-    return f"played {n} games"
+    return f"played {n} game" + ("s" if n != 1 else "")
 
 
 def is_key(league, u, pos, team_n):
@@ -407,8 +408,10 @@ def build(league, tmk, L, today, log):
         if g["completed"]:
             continue
         yb, ya = m["yes_bid"], m["yes_ask"]
-        mid = (yb + ya) / 2 if (yb and ya and 0 < yb < ya < 1) else (ya if ya and 0 < ya < 1 else None)
-        if mid is None or (m["kind"] != "win" and not (MIN_PRICE <= mid <= 1 - MIN_PRICE)):
+        if not (yb and ya and 0 < yb < ya < 1) or ya - yb > MAX_SPREAD:
+            continue                     # nobody's really quoting it yet (new listings sit at 1c bid / 95c ask)
+        mid = (yb + ya) / 2
+        if m["kind"] != "win" and not (MIN_PRICE <= mid <= 1 - MIN_PRICE):
             continue
         hid, aid_ = g["home_id"], g["away_id"]
         if m["kind"] == "total":
