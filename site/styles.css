@@ -91,6 +91,7 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .key .sw { display: inline-block; width: 22px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
 .key .sw.g { background: var(--hit-wash); box-shadow: inset 0 -2px 0 var(--hit); }
 .key .sw.r { background: var(--miss-wash); box-shadow: inset 0 -2px 0 var(--miss); }
+.key .sw.x { background: var(--ink-3); opacity: .55; }
 
 /* ---------- board ---------- */
 .board { border-top: 1px solid var(--line); }
@@ -251,6 +252,12 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .chart .thr-lab { fill: var(--ink); font-size: 12px; font-weight: 700; font-family: var(--font); }
 .chart .bar.hit { fill: var(--hit); }
 .chart .bar.miss { fill: var(--miss); }
+.chart .bar.hurt { fill: var(--ink-3); opacity: .55; }
+.legend .lx { background: var(--ink-3); opacity: .55; }
+.tip .warn { color: var(--warn); }
+.tbl tr.has-note td { border-bottom: 0; }
+.tbl tr.injrow td { text-align: left; color: var(--ink-3); font-size: 12px; padding-top: 0; white-space: normal; }
+.tbl tr.injrow.hurt td { color: var(--warn); }
 .chart .hitbox { fill: transparent; cursor: default; }
 .chart .hitbox:focus { outline: none; }
 .chart g.b:hover .bar, .chart g.b:focus-within .bar { opacity: .82; }
@@ -284,6 +291,7 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 5px; vertical-align: 1px; }
 .dot.hit { background: var(--hit); }
 .dot.miss { background: var(--miss); }
+.dot.hurt { background: var(--ink-3); }
 .scroll-x { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
 
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }

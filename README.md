@@ -56,6 +56,14 @@ Real arbitrage is rare. The two sites usually agree within a few cents, and the 
 
 Hit rates are colored **against the price**, not against 50%. A 60% hit rate on a line priced at 75¢ shows red, because the player clears it less often than the market expects.
 
+## Injuries
+
+- **Games he left hurt.** If a player played far less than usual (under half his normal minutes in the NBA or ice time in the NHL; under 40% of his normal pass attempts, or carries plus targets, in the NFL) and then missed his team's next game or went on the injury report within a few days, that game is marked *left early hurt*. It's drawn grey, and it's left out of hit rates and the model. Whether he missed a game comes from both the box score and his game log. Short games without that evidence (foul trouble, ejections, blowouts) are noted but still count.
+- **Missed games.** Players who missed their team's last game or games are flagged, and so are players who left their last game hurt. Both lower the confidence rating.
+- **Today's injury report.** ESPN's status (Questionable, Doubtful, Out) shows next to the player and lowers confidence. Out players get no edge.
+- All-Star games and exhibitions against teams outside the league are left out of the game logs.
+- Kalshi still settles on the stats if a player plays at all, so an early injury exit is a loss there. The hit rates just don't let one fluky game drag down a healthy player's numbers.
+
 ## Honest limits
 
 - The data refreshes every 10 to 60 minutes, depending on GitHub's scheduler. The time of the last update is at the top of each page. Always check the live price on Kalshi before trading.

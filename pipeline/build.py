@@ -11,7 +11,7 @@ import traceback
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import cache, espn, kalshi, matchups, model, stats
+from . import cache, espn, injury, kalshi, matchups, model, stats
 from .espn import ET, norm_name
 
 OUT = os.environ.get("PROP_OUT", "site/data")
@@ -152,39 +152,70 @@ def load_league(league, props, today):
         return aid, (cur or []) + (prev or [])
 
     logs = dict(pmap(logs_for, aids))
+    # All-Star games and exhibitions against teams outside the league aren't real games for a prop
+    abbrs = {t.get("abbr") for t in teams if t.get("abbr")}
+    alias = TEAM_ALIASES.get(league, {})
+
+    def in_league(opp):
+        if not opp or not abbrs or opp in abbrs or alias.get(opp) in abbrs:
+            return True
+        return any(len(a) >= 2 and len(opp) >= 2 and (a.startswith(opp) or opp.startswith(a)) for a in abbrs)  # UTA ~ UTAH
+    odd = defaultdict(int)
+    for aid, gl in logs.items():
+        keep = [x for x in gl if in_league(x.get("opp"))]
+        for x in gl:
+            if x not in keep:
+                odd[x.get("opp")] += 1
+        logs[aid] = keep
+    if odd:
+        log(f"{league}: left out games against non-league opponents {dict(odd)}")
     cur_counts = sorted(sum(1 for g in gl if g["season"] == "cur") for gl in logs.values())
     median_cur = cur_counts[len(cur_counts) // 2] if cur_counts else 0
 
     # opponent defense vs position from this season's finished games
-    table = safe(build_matchups, league, cur_season, today, pos_of, default=None, label="matchups")
+    table, team_games = safe(build_matchups, league, cur_season, today, pos_of, default=(None, {}), label="matchups")
     inj = safe(espn.injuries, league, default={}, label="injuries") or {}
     roster_by_id = {a["id"]: a for a in athletes}
+
+    # games he left early hurt: marked, and left out of hit rates and the model
+    hurt = 0
+    for aid, tid in aids:
+        ath = roster_by_id.get(aid) or {}
+        hurt += injury.mark(league, logs.get(aid) or [], team_games.get(tid), aid, inj.get(aid),
+                            qb=(ath.get("pos") == "QB"), team_abbr=(team_by_id.get(tid) or {}).get("abbr"))
+    log(f"{league}: {hurt} games marked as left early hurt")
     return {"league": league, "matched": matched, "unmatched": dict(unmatched), "logs": logs, "games": games,
             "table": table, "inj": inj, "athletes": roster_by_id, "teams": team_by_id, "lg_total": lg_total,
-            "median_cur": median_cur}
+            "median_cur": median_cur, "team_games": team_games}
 
 
 def build_matchups(league, season, today, pos_of):
-    eids = []
+    """Opponent defense table from this season's finished games, plus each team's game dates."""
+    done = []
     if league == "nfl":
         for wk in range(1, 19):
-            wk_games = espn.nfl_week(season, wk) or []
-            done = [g for g in wk_games if g["completed"] and g["season_type"] == 2]
-            eids.extend(g["eid"] for g in done)
-            if not done:
+            wk_games = [g for g in espn.nfl_week(season, wk) or [] if g["completed"] and g["season_type"] == 2]
+            done.extend(wk_games)
+            if not wk_games:
                 break
     else:
         start = dt.date(today.year if today.month >= 8 else today.year - 1, 10, 1)
         d = start
         while d < today:
-            for g in espn.games_on(league, d) or []:
-                if g["completed"] and g["season_type"] in (2, 3):
-                    eids.append(g["eid"])
+            done.extend(g for g in espn.games_on(league, d) or [] if g["completed"] and g["season_type"] in (2, 3))
             d += dt.timedelta(days=1)
-    eids = sorted(set(eids))
+    eids = sorted({g["eid"] for g in done})
     boxes = dict(zip(eids, pmap(lambda e: safe(espn.boxscore, league, e, default=[], label="box"), eids)))
     log(f"{league}: matchups from {len(eids)} finished games")
-    return matchups.build(league, boxes, pos_of)
+    # each team's finished games and who played in them (None when the box score didn't load)
+    team_games = defaultdict(dict)
+    for g in done:
+        lines = boxes.get(g["eid"]) or []
+        for tid in (g["home_id"], g["away_id"]):
+            if tid and g.get("date"):
+                who = {ln["aid"] for ln in lines if ln.get("team_id") == tid}
+                team_games[tid][g["date"]] = who or None
+    return matchups.build(league, boxes, pos_of), {t: sorted(v.items()) for t, v in team_games.items()}
 
 
 # ---------------------------------------------------------------- per prop
@@ -195,8 +226,9 @@ def evaluate(p, L):
     home = g["home_id"] == p["team_id"]
     opp_id = g["away_id"] if home else g["home_id"]
     opp = g["away"] if home else g["home"]
-    played = [x for x in games if x["s"].get(stat) is not None and (x["date"] or "") < g["date"]]
-    summ = stats.summarize(played, stat, line, opp)
+    played_all = [x for x in games if x["s"].get(stat) is not None and (x["date"] or "") < g["date"]]
+    summ = stats.summarize(played_all, stat, line, opp)
+    played = [x for x in played_all if not injury.is_hurt(x)]   # games he left hurt don't count
     cur_vals = [x["s"][stat] for x in played if x["season"] == "cur"]
     prev_vals = [x["s"][stat] for x in played if x["season"] == "prev"]
     ath = L["athletes"].get(p["aid"]) or {}
@@ -205,7 +237,7 @@ def evaluate(p, L):
         grp = "G"
 
     # rest days
-    last = next((x["date"] for x in played), None)
+    last = next((x["date"] for x in played_all), None)
     rest = (dt.date.fromisoformat(g["date"]) - dt.date.fromisoformat(last)).days if last else None
     b2b = rest == 1 and league in ("nba", "nhl")
 
@@ -270,6 +302,11 @@ def evaluate(p, L):
     if vol and vol["szn"] and abs(vol["l3"] - vol["szn"]) / max(vol["szn"], 1) > 0.25:
         flags.append("Role change")
     n_cur, n_prev = len(cur_vals), len(prev_vals)
+    missed = injury.missed_since((L.get("team_games") or {}).get(p["team_id"]), p["aid"], g["date"], played_all)
+    if missed and not (status in OUT_STATUS):
+        flags.append(f"Missed last {missed} game{'s' if missed != 1 else ''}")
+    if played_all and injury.is_hurt(played_all[0]):
+        flags.append("Left last game hurt")
     if n_cur == 0 and L.get("median_cur", 0) >= 3:
         flags.append("First game this season")
     elif rest is not None and rest > 25:
@@ -279,7 +316,8 @@ def evaluate(p, L):
     conf = 1 if n_eff < lo else (3 if (n_cur >= (5 if league == "nfl" else 8) and n_eff >= hi) else 2)
     if n_eff < lo:
         flags.append("Small sample")
-    if any(f in flags for f in ("Questionable", "Doubtful", "Day-To-Day", "Wide spread", "Role change", "Live")):
+    if any(f in flags for f in ("Questionable", "Doubtful", "Day-To-Day", "Wide spread", "Role change", "Live",
+                                "Left last game hurt")) or any(f.startswith("Missed last") for f in flags):
         conf -= 1
     if "First game this season" in flags or "Long layoff" in flags:
         conf = min(conf, 1)
@@ -309,7 +347,9 @@ def evaluate(p, L):
         "mid": r2(mid, 3),
         "h": {k: [v["hit"], v["n"]] for k, v in summ.items() if isinstance(v, dict) and k not in ("home2", "away2")},
         "strk": summ["streak"], "avg": summ["avg"], "avg10": summ["avg_l10"], "diff": summ["diff"],
-        "last10": [x["s"][stat] for x in played[:10]],
+        "last10": [x["s"][stat] for x in played_all[:10]],
+        "x10": [i for i, x in enumerate(played_all[:10]) if injury.is_hurt(x)],   # left hurt: drawn grey, not counted
+        "nx": summ["hurt"],
         "p": r2(p_model), "pb": r2(p_blend), "e": {s: r2(v, 4) for s, v in e.items()}, "best": best,
         "be": r2(e.get(best), 4) if best else None, "conf": conf, "flags": flags,
     }
@@ -376,7 +416,8 @@ def main():
                 with open(os.path.join(OUT, "p", f"{row['pid']}.json"), "w") as f:
                     json.dump({"pid": row["pid"], **players[row["pid"]],
                                "games": [{k: x.get(k) for k in ("eid", "date", "opp", "home", "res", "score", "post",
-                                                                "season", "s")} for x in gl]}, f, separators=(",", ":"))
+                                                                "season", "s", "inj") if x.get(k) is not None or k != "inj"}
+                                         for x in gl]}, f, separators=(",", ":"))
         league_meta[league] = {"props": kept, "games": len({r["gid"] for r in rows if r["lg"] == league}),
                                "unmatched": sum(L["unmatched"].values())}
         log(f"{league}: {kept} props kept, {sum(L['unmatched'].values())} unmatched markets")

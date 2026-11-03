@@ -36,7 +36,10 @@
     nhl: [['toi', 'TOI'], ['goals', 'G'], ['assists', 'A'], ['points', 'PTS'], ['sog', 'SOG'], ['saves', 'SV'], ['sa', 'SA'], ['ga', 'GA']],
   };
   const RANGES = [['l5', 'L5'], ['l10', 'L10'], ['l20', 'L20'], ['szn', 'Season'], ['prev', 'Last season'], ['h2h', 'H2H']];
-  const SHOW_FLAGS = new Set(['Live', 'Check news', 'First game this season', 'Long layoff', 'Role change', 'Small sample', 'Wide spread']);
+  const SHOW_FLAGS = new Set(['Live', 'Check news', 'First game this season', 'Long layoff', 'Role change', 'Small sample', 'Wide spread', 'Left last game hurt']);
+  const showFlag = (f) => SHOW_FLAGS.has(f) || f.startsWith('Missed last');
+  const injuryFlag = (f) => f === 'Left last game hurt' || f.startsWith('Missed last');
+  const isHurt = (g) => !!(g && g.inj && g.inj.kind === 'hurt');
   const PAGE = 100;
 
   // ------------------------------------------------------------ state
@@ -285,20 +288,24 @@
     return `<div class="c-hr${extra}" role="cell"><span class="lbl">${lbl}</span><span class="hr ${cls}">${body}${n}</span></div>`;
   }
 
-  function stripSVG(vals, line) {
+  function stripSVG(vals, line, hurtIdx) {
+    const n0 = Math.min(vals.length, 10);
+    const hurt = new Set((hurtIdx || []).map((i) => n0 - 1 - i));   // indexes after the reverse below
     const v = vals.slice(0, 10).reverse();
     const W = 100, H = 30, bw = 8, gap = 2;
     const max = Math.max(line * 1.35, ...v, 1);
     const thr = H - ((line - 0.5) / max) * (H - 2);
     let x = W - v.length * (bw + gap) + gap;
     let s = '';
-    for (const val of v) {
+    v.forEach((val, i) => {
       const h = Math.max(2, (Math.max(0, val) / max) * (H - 2));
-      s += `<path d="${roundTop(x, H - h, bw, h, 2)}" fill="var(--${val >= line ? 'hit' : 'miss'})"/>`;
+      const fill = hurt.has(i) ? 'var(--ink-3)' : `var(--${val >= line ? 'hit' : 'miss'})`;
+      s += `<path d="${roundTop(x, H - h, bw, h, 2)}" fill="${fill}"${hurt.has(i) ? ' opacity=".55"' : ''}/>`;
       x += bw + gap;
-    }
-    const hits = v.filter((x2) => x2 >= line).length;
-    const label = v.length ? `Last ${v.length}: hit ${hits} of ${v.length}` : 'No games yet';
+    });
+    const counted = v.filter((_, i) => !hurt.has(i));
+    const hits = counted.filter((x2) => x2 >= line).length;
+    const label = v.length ? `Last ${v.length}: hit ${hits} of ${counted.length}` + (hurt.size ? `. ${hurt.size} game${hurt.size > 1 ? 's' : ''} he left hurt, not counted (grey)` : '') : 'No games yet';
     return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${label}"><title>${label}</title>${s}` +
       `<line x1="0" x2="${W}" y1="${thr}" y2="${thr}" stroke="var(--ink)" stroke-width="1" stroke-dasharray="3 2" opacity=".75"/></svg>`;
   }
@@ -323,7 +330,8 @@
   function rowHTML(r) {
     const P = r.P, G = r.G, k = r.k;
     const vs = r.home ? 'vs' : '@';
-    const flags = r.flags.filter((f) => SHOW_FLAGS.has(f)).slice(0, 2).map((f) => `<span class="flag">${esc(f)}</span>`).join('');
+    const flags = r.flags.filter(showFlag).sort((a, b) => injuryFlag(b) - injuryFlag(a)).slice(0, 2)
+      .map((f) => `<span class="flag${injuryFlag(f) ? ' inj' : ''}">${esc(f)}</span>`).join('');
     const yes = priceOk(k.ya) ? `<b>${cents(k.ya)}</b>` : '—';
     const no = priceOk(k.na) ? `<b>${cents(k.na)}</b>` : '—';
     const venue = r.home ? 'home' : 'away';
@@ -339,7 +347,7 @@
         <div class="meta"><span><span class="lg">${esc(P.team || '')}</span> ${esc(P.pos || '')}</span><span>${vs} ${esc(r.opp)}, ${esc(fmtWhen(G))}</span>${injFlag(P.inj)}${flags}</div></div>
       <div class="c-prop" role="cell"><span class="line">${BINARY.has(r.stat) ? 'Yes' : r.line + '+'}</span><span class="stat">${esc(r.short)}</span></div>
       <div class="c-kalshi" role="cell"><span class="px"><span>Yes</span> ${yes}</span><span class="px"><span>No</span> ${no}</span></div>
-      <div class="c-strip" role="cell">${stripSVG(r.last10 || [], r.line)}</div>
+      <div class="c-strip" role="cell">${stripSVG(r.last10 || [], r.line, r.x10)}</div>
       <div class="chips">
         ${chip(r.h.l5, r.mid, 'L5')}${chip(r.h.l10, r.mid, 'L10')}${chip(r.h.l20, r.mid, 'L20', ' wide')}${chip(r.h.szn, r.mid, 'Season')}${chip(r.h.h2h, r.mid, 'H2H')}${chip(r.h[venue], r.mid, r.home ? 'Home' : 'Away')}
         <div class="c-streak" role="cell"><span class="lbl">Streak</span>${streak}</div>
@@ -465,7 +473,8 @@
     }
 
     const gs = gamesFor(st.pf, r, st.range, st.venue, st.stat);
-    const vals = gs.map((g) => g.s[st.stat]);
+    const nHurt = gs.filter(isHurt).length;
+    const vals = gs.filter((g) => !isHurt(g)).map((g) => g.s[st.stat]);
     const hits = vals.filter((v) => v >= r.line).length;
     const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
     const sorted = vals.slice().sort((a, b) => a - b);
@@ -477,10 +486,10 @@
         <div class="seg" role="group" aria-label="Venue">${[['all', 'All'], ['home', 'Home'], ['away', 'Away']].map(([k, n]) => `<button type="button" data-venue="${k}" aria-pressed="${k === st.venue}">${n}</button>`).join('')}</div>
       </div>
       <div class="hero"><span class="big">${vals.length ? pct(hits / vals.length) : '—'}</span>
-        <span class="lab">hit ${BINARY.has(r.stat) ? '' : r.line + '+ '}${esc(statLabel(r.lg, st.stat).toLowerCase())} in ${hits} of ${vals.length} games (${esc(rangeName)}${st.venue !== 'all' ? ', ' + st.venue : ''})</span>
+        <span class="lab">hit ${BINARY.has(r.stat) ? '' : r.line + '+ '}${esc(statLabel(r.lg, st.stat).toLowerCase())} in ${hits} of ${vals.length} games (${esc(rangeName)}${st.venue !== 'all' ? ', ' + st.venue : ''})${nHurt ? `, not counting ${nHurt} game${nHurt > 1 ? 's' : ''} he left hurt` : ''}</span>
         <span class="sub">Average ${fmtNum(avg == null ? null : Math.round(avg * 10) / 10)}, median ${fmtNum(med)}</span></div>
       <div class="chart" id="chart"></div>
-      <div class="legend"><span><i class="lh"></i>Hit</span><span><i class="lm"></i>Missed</span><span><i class="ll"></i>${BINARY.has(r.stat) ? 'Yes' : r.line + '+'} line</span></div>`;
+      <div class="legend"><span><i class="lh"></i>Hit</span><span><i class="lm"></i>Missed</span>${nHurt ? '<span><i class="lx"></i>Left hurt, not counted</span>' : ''}<span><i class="ll"></i>${BINARY.has(r.stat) ? 'Yes' : r.line + '+'} line</span></div>`;
 
     html += ladderHTML(ladder, r);
     html += modelHTML(r, st.pf);
@@ -516,9 +525,10 @@
     const tip = $('#tip');
     const v = game.s[stat];
     const vol = r.lg === 'nba' ? `${fmtNum(game.s.min)} min` : r.lg === 'nhl' ? `${fmtNum(game.s.toi)} min TOI` : '';
-    tip.innerHTML = `<b>${fmtNum(v)} ${esc(statLabel(r.lg, stat).toLowerCase())}</b> ${v >= r.line ? '(hit)' : '(missed)'}<br>` +
+    tip.innerHTML = `<b>${fmtNum(v)} ${esc(statLabel(r.lg, stat).toLowerCase())}</b> ${isHurt(game) ? '(left hurt, not counted)' : v >= r.line ? '(hit)' : '(missed)'}<br>` +
       `${game.home ? 'vs' : '@'} ${esc(game.opp)}, ${md(game.date)}${game.res ? `, ${esc(game.res)} ${esc(game.score || '')}` : ''}` +
-      (vol ? `<br><span class="muted">${vol}</span>` : '') + (game.post ? '<br><span class="muted">Playoffs</span>' : '');
+      (vol ? `<br><span class="muted">${vol}</span>` : '') + (game.post ? '<br><span class="muted">Playoffs</span>' : '') +
+      (game.inj ? `<br><span class="${isHurt(game) ? 'warn' : 'muted'}">${esc(game.inj.why)}</span>` : '');
     tip.hidden = false;
     let x, y;
     if (e.type === 'focusin') {
@@ -566,13 +576,14 @@
       const h = Math.max(2, (Math.max(0, v) / ymax) * plotH);
       const yy = top + plotH - h;
       const hit = v >= line;
-      s += `<g class="b" data-i="${i}"><path class="bar ${hit ? 'hit' : 'miss'}" d="${roundTop(cx - bw / 2, yy, bw, h, 4)}"/>`;
+      const cls = isHurt(g) ? 'hurt' : hit ? 'hit' : 'miss';
+      s += `<g class="b" data-i="${i}"><path class="bar ${cls}" d="${roundTop(cx - bw / 2, yy, bw, h, 4)}"/>`;
       if (n <= 16) labels += `<text class="val" x="${cx}" y="${yy - 5}" text-anchor="middle">${fmtNum(v)}</text>`;
       if (n <= 12) {
         s += `<text class="axis" x="${cx}" y="${H - bottom + 15}" text-anchor="middle">${g.home ? '' : '@'}${esc(g.opp)}</text>`;
         s += `<text class="axis" x="${cx}" y="${H - bottom + 29}" text-anchor="middle">${md(g.date)}</text>`;
       }
-      s += `<rect class="hitbox" x="${left + slot * i}" y="${top - 18}" width="${slot}" height="${plotH + bottom + 18}" tabindex="0" aria-label="${fmtNum(v)} ${g.home ? 'vs' : 'at'} ${esc(g.opp)} on ${md(g.date)}, ${hit ? 'hit' : 'missed'}"/></g>`;
+      s += `<rect class="hitbox" x="${left + slot * i}" y="${top - 18}" width="${slot}" height="${plotH + bottom + 18}" tabindex="0" aria-label="${fmtNum(v)} ${g.home ? 'vs' : 'at'} ${esc(g.opp)} on ${md(g.date)}, ${isHurt(g) ? 'left hurt, not counted' : hit ? 'hit' : 'missed'}"/></g>`;
     });
     if (n > 12) {
       const k = Math.ceil(n / 7);
@@ -662,11 +673,14 @@
         const v = g.s[k];
         if (k !== stat) return `<td>${fmtNum(v)}</td>`;
         const hit = v != null && v >= r.line;
-        return `<td class="on">${fmtNum(v)}<span class="dot ${hit ? 'hit' : 'miss'}" role="img" aria-label="${hit ? 'hit' : 'missed'}"></span></td>`;
+        const cls = isHurt(g) ? 'hurt' : hit ? 'hit' : 'miss';
+        return `<td class="on">${fmtNum(v)}<span class="dot ${cls}" role="img" aria-label="${isHurt(g) ? 'left hurt, not counted' : hit ? 'hit' : 'missed'}"></span></td>`;
       }).join('');
-      return `<tr><td>${md(g.date)}${g.season === 'prev' ? ' ’' + String(Number((g.date || '').slice(2, 4))) : ''}</td><td>${g.home ? 'vs' : '@'} ${esc(g.opp)}</td><td>${esc(g.res || '')} ${esc(g.score || '')}</td>${tds}</tr>`;
+      const note = g.inj ? `<tr class="injrow${isHurt(g) ? ' hurt' : ''}"><td colspan="${3 + cols.length}">${esc(g.inj.why)}</td></tr>` : '';
+      return `<tr${g.inj ? ' class="has-note"' : ''}><td>${md(g.date)}${g.season === 'prev' ? ' ’' + String(Number((g.date || '').slice(2, 4))) : ''}</td><td>${g.home ? 'vs' : '@'} ${esc(g.opp)}</td><td>${esc(g.res || '')} ${esc(g.score || '')}</td>${tds}</tr>${note}`;
     }).join('');
-    return `<div class="sec"><h3>Game log</h3><p class="note">Last ${games.length} games. The dot marks whether he reached ${BINARY.has(stat) ? 'it' : r.line + '+'}.</p><div class="scroll-x"><table class="tbl">${head}${body}</table></div></div>`;
+    const nHurt = games.filter(isHurt).length;
+    return `<div class="sec"><h3>Game log</h3><p class="note">Last ${games.length} games. The dot marks whether he reached ${BINARY.has(stat) ? 'it' : r.line + '+'}.${nHurt ? ` Grey dots are games he left early hurt: they aren’t counted in his hit rates or the model, because a game he left in the first quarter says little about tonight. Kalshi still settles on his stats if he plays at all, so an early exit counts as a miss there.` : ''}</p><div class="scroll-x"><table class="tbl">${head}${body}</table></div></div>`;
   }
 
   function bindDrawer() {
