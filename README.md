@@ -1,6 +1,6 @@
 # Prop Finder
 
-A research board for **Kalshi player props and team bets** in the NBA, NFL and NHL. For every open market it shows the Kalshi price next to the history: hit rates over the last 5, 10 and 20 games, this season, last season, against tonight's opponent and at home or away, plus the current streak, a matchup rating and a stats-based estimate of the edge after Kalshi's fee.
+A research board for **Kalshi player props and team bets** in the NBA, NFL and NHL, plus the game markets for every other sport Kalshi lists (college football and basketball, soccer, tennis, UFC and boxing, esports, cricket and more). For every open market it shows the Kalshi price next to the history: hit rates over the last 5, 10 and 20 games, this season, last season, against tonight's opponent and at home or away, plus the current streak, a matchup rating and a stats-based estimate of the edge after Kalshi's fee.
 
 **Live site:** https://jakegrayyt-ai.github.io/prop-finder/
 
@@ -68,6 +68,16 @@ Kalshi's moneylines, spreads, game totals and team totals sit on the same board 
 - **Injury report.** The drawer lists both teams' injuries from ESPN with each player's minutes and production this season from the box scores, and flags **Key player out** when a regular is out. A team's past results include games he played, so its trends can look better than tonight's lineup.
 - Kalshi settles team bets on the final score, overtime included.
 
+## Every other sport
+
+Kalshi only has player props for the NBA, NFL and NHL. For everything else it lists game markets, and the board shows all of them: winner (and draw in soccer), spread, game total, team total and both teams to score, for college football and basketball, about 60 soccer leagues, tennis, UFC and boxing, esports, cricket, and basketball, hockey, football and baseball leagues abroad. They load a moment after the props, under their own chips.
+
+- **No hand-made list.** `pipeline/sports.py` reads Kalshi's list of sports series each run and keeps the per-game ones, so a league Kalshi adds shows up by itself.
+- **History comes from Kalshi.** Every market Kalshi settled since late summer (as far back as its API goes; the cache keeps what it has seen, so the history grows). A settled market carries the result: the total, the margin, both scores. A reported number is used only when all of that game's settled lines agree with it; otherwise the lines themselves pin the score down where they can.
+- **The model is a trend estimate.** The hit rate on that line, recent games counted more, pulled toward Kalshi's price with 10 games' worth of weight. The edge leans on the price even more, and more again for long shots.
+- Kalshi lists the away team first for US college games, so those get home and away splits. Elsewhere Kalshi doesn't say who's at home, so there's no venue split.
+- Ladders keep the 7 lines closest to a coin flip, and lines without a real two-sided quote are left off.
+
 ## Injuries
 
 - **Games he left hurt.** If a player played far less than usual (under half his normal minutes in the NBA or ice time in the NHL; under 40% of his normal pass attempts, or carries plus targets, in the NFL) and then missed his team's next game or went on the injury report within a few days, that game is marked *left early hurt*. It's drawn grey, and it's left out of hit rates and the model. Whether he missed a game comes from both the box score and his game log. Short games without that evidence (foul trouble, ejections, blowouts) are noted but still count.
@@ -96,6 +106,7 @@ Kalshi's moneylines, spreads, game totals and team totals sit on the same board 
 pipeline/kalshi.py     Kalshi prop and team markets -> player or team, stat, line, prices
 pipeline/espn.py       ESPN rosters, schedules, team schedules, injuries, game logs, box scores
 pipeline/teams.py      team bets: results history, team ratings, projected scores, injury report
+pipeline/sports.py     every other Kalshi sport: game markets, history from Kalshi's settled markets
 pipeline/matchups.py   opponent defense vs position from this season's box scores
 pipeline/stats.py      hit rates, splits, streaks
 pipeline/model.py      projection, probability, Kalshi fee and edge

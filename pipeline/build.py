@@ -11,7 +11,7 @@ import traceback
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import cache, espn, injury, kalshi, matchups, model, stats, teams
+from . import cache, espn, injury, kalshi, matchups, model, sports, stats, teams
 from .espn import ET, norm_name
 from .kalshi import TEAM_ALIASES, team_match
 
@@ -491,6 +491,22 @@ def main():
     }
     with open(os.path.join(OUT, "board.json"), "w") as f:
         json.dump(board, f, separators=(",", ":"))
+
+    # every other sport Kalshi lists, in its own file so the props board loads first
+    try:
+        X = sports.build(today, log)
+    except Exception:  # noqa: BLE001
+        log(f"other sports failed:\n{traceback.format_exc()}"[:2000])
+        X = None
+    if X is not None:
+        for pid, blob in X["files"].items():
+            with open(os.path.join(OUT, "p", f"{pid}.json"), "w") as f:
+                json.dump(blob, f, separators=(",", ":"))
+        X["rows"].sort(key=lambda r: (r["be"] is None, -(r["be"] or -9)))
+        more = {"updated": board["updated"], "leagues": X["leagues"], "groups": sports.GROUPS,
+                "games": X["games"], "players": X["players"], "props": X["rows"]}
+        with open(os.path.join(OUT, "more.json"), "w") as f:
+            json.dump(more, f, separators=(",", ":"))
     with open(os.path.join(OUT, "debug.json"), "w") as f:
         json.dump({"log": _log[-400:], "unmatched": unmatched, "series": counts}, f, indent=1)
     log(f"done: {len(rows)} rows (props and team bets), {len(players)} players and teams in {time.time() - t0:.0f}s")
