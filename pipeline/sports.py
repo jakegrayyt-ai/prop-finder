@@ -328,9 +328,11 @@ def team_history(lg, cfg, past):
             tid = f"{c}:{slug(names.get(c))}"
             who[tid] = (c, names.get(c) or c)
             home = (c == b) if cfg["group"] in AWAY_FIRST else None
+            sc_txt = f"{score[c]}-{score[o]}" if score else None
+            if not sc_txt and "tpts" in s and "margin" in s and s["tpts"] - s["margin"] >= 0:
+                sc_txt = f"{s['tpts']:.0f}-{s['tpts'] - s['margin']:.0f}"     # their score and the margin give both
             games[tid].append({"eid": key, "date": e["d"], "season": "cur", "post": False, "opp": o,
-                               "oppn": names.get(o) or o, "home": home, "res": res,
-                               "score": f"{score[c]}-{score[o]}" if score else None, "s": s})
+                               "oppn": names.get(o) or o, "home": home, "res": res, "score": sc_txt, "s": s})
     for gs in games.values():
         gs.sort(key=lambda g: (g["date"], g["eid"]), reverse=True)
     return games, who
