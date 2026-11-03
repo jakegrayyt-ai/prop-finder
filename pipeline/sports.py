@@ -45,10 +45,14 @@ UNIT = {"soccer": "goals", "hockey": "goals", "hoops": "points", "football": "po
 AWAY_FIRST = {"cfb", "cbb", "football"}                  # Kalshi lists the away team first in US games
 DURATION = {"soccer": 2.0, "cfb": 3.5, "football": 3.5, "cbb": 2.2, "hoops": 2.2, "hockey": 2.6, "baseball": 3.0,
             "tennis": 2.0, "esports": 2.5, "cricket": 4.0, "fights": 0.5, "other": 2.0}
-MIN_PRICE, MAX_SPREAD = 0.04, 0.30
+MIN_PRICE, MAX_SPREAD = 0.06, 0.30
+LADDER = 7                          # lines kept per ladder (team + bet type), the ones closest to a coin flip
 DAYS_AHEAD = 6
 HALF_LIFE, PRIOR = 10.0, 10.0       # trend estimate: games until a game's weight halves; games' worth of price prior
-SETTLED_TTL = 25 * 60               # top up each series' settled history at most this often
+SETTLED_TTL = 90 * 60               # top up each series' settled history at most this often
+SETTLED_PAGES = 160                 # per run; the first backfill spreads over a few runs instead of tripping rate limits
+EMPTY_TTL = 3 * 3600                # a series with nothing open is checked again after this long
+NO_EXACT_MARGIN = {"tennis"}        # Kalshi's value on tennis game spreads isn't the margin
 
 
 def r2(x, n=3):
@@ -130,12 +134,15 @@ def parse(kind, mk):
     return {**base, "k": kind, "c": code, "line": line} if code else None
 
 
-def settled(series, kind):
-    """Settled results for one series, by event key. Cached; each run only asks for what settled since last time."""
-    key = f"kalshi/settled/{series}"
+def settled(series, kind, budget):
+    """Settled results for one series, by event key. Cached; each run only asks for what settled since last time.
+    budget: shared list [pages left this run]."""
+    key = f"kalshi/settled3/{series}"
     data, saved = cache.entry(key)
     if data and time.time() - saved < SETTLED_TTL:
         return data["ev"]
+    if budget[0] <= 0:
+        return (data or {}).get("ev", {})
     data = data or {"since": 0, "ev": {}}
     params = {"series_ticker": series, "status": "settled", "limit": 1000}
     if data["since"]:
@@ -144,6 +151,7 @@ def settled(series, kind):
     for _ in range(80):
         if cursor:
             params["cursor"] = cursor
+        budget[0] -= 1
         d = get_json(BASE + "/markets", params=params)
         mks = d.get("markets") or []
         for mk in mks:
@@ -153,6 +161,7 @@ def settled(series, kind):
             newest = max(newest, _ts(mk.get("close_time")))
             e = data["ev"].setdefault(p["key"], {"d": p["date"]})
             res, val = mk.get("result"), mk.get("expiration_value")
+            r = 1 if res == "yes" else 0 if res == "no" else None
             if kind == "win":
                 if p["k"] == "win":
                     e.setdefault("n", {})[p["c"]] = p["name"]
@@ -162,14 +171,22 @@ def settled(series, kind):
                     e["void"] = 1          # cancelled, postponed or settled at a fair price
             elif kind == "btts" and res in ("yes", "no"):
                 e["b"] = 1 if res == "yes" else 0
-            elif kind == "total" and _num(val) is not None:
-                e["t"] = _num(val)
-            elif kind == "margin" and _num(val) is not None:
-                e["m"] = abs(_num(val))
+            elif kind == "total":
+                if _num(val) is not None:
+                    e["t"] = _num(val)
+                if r is not None:
+                    e.setdefault("tk", []).append([p["line"], r])
+            elif kind == "margin":
+                if _num(val) is not None:
+                    e["m"] = abs(_num(val))
+                if r is not None:
+                    e.setdefault("mk", []).append([p["c"], p["line"], r])
             elif kind == "tpts":
                 sc = re.match(r"\s*Home:\s*(\d+)\s*,\s*Away:\s*(\d+)", str(val or ""))
                 if sc:
                     e["s"] = [int(sc.group(1)), int(sc.group(2))]
+                if r is not None:
+                    e.setdefault("sk", []).append([p["c"], p["line"], r])
         cursor = d.get("cursor")
         if not cursor or len(mks) < 1000:
             break
@@ -211,6 +228,26 @@ def milestones(log):
 
 
 # ---------------------------------------------------------------- history
+def bounds(checks, lo=None, hi=None):
+    """[(line, won)] -> the range the real value must be in: 'over 2.5' won means 3 or more."""
+    for line, r in checks:
+        if r:
+            lo = line if lo is None else max(lo, line)
+        else:
+            hi = line - 1 if hi is None else min(hi, line - 1)
+    return lo, hi
+
+
+def pick(value, lo, hi):
+    """Kalshi's reported value if the settled lines agree with it, else the value the lines pin down, else None."""
+    inside = value is not None and (lo is None or value >= lo) and (hi is None or value <= hi)
+    if inside:
+        return float(value)
+    if lo is not None and lo == hi:
+        return float(lo)
+    return None
+
+
 def order_codes(key, codes):
     """'26OCT31ORSTFRES' + {'FRES', 'ORST'} -> ['ORST', 'FRES'] (the order in the ticker)."""
     m = arb.EVENT_RE.match(key)
@@ -233,21 +270,38 @@ def team_history(lg, cfg, past):
             continue
         a, b = order_codes(key, codes)
         w = e["w"]
-        total = (past.get("total", {}).get(key) or {}).get("t")
-        mabs = (past.get("margin", {}).get(key) or {}).get("m")
-        sc = (past.get("tpts", {}).get(key) or {}).get("s")
+        te = past.get("total", {}).get(key) or {}
+        me = past.get("margin", {}).get(key) or {}
+        se = past.get("tpts", {}).get(key) or {}
         btts = (past.get("btts", {}).get(key) or {}).get("b")
+        total = pick(te.get("t"), *bounds(te.get("tk") or []))
+        # each team's margin range: its own spread lines, the other team's (inverted), and who won
+        mb = {}
+        for c, o in ((a, b), (b, a)):
+            lo, hi = (0, 0) if w == "TIE" else ((1, None) if w == c else (None, -1))
+            for code, line, r in me.get("mk") or []:
+                if code == c:
+                    lo, hi = bounds([(line, r)], lo, hi)
+                elif code == o:      # other team won by `line`+  <=>  this team's margin <= -line
+                    if r:
+                        hi = -line if hi is None else min(hi, -line)
+                    else:
+                        lo = 1 - line if lo is None else max(lo, 1 - line)
+            mb[c] = (lo, hi)
+        mabs = None if cfg["group"] in NO_EXACT_MARGIN else me.get("m")
         score = {}
-        if sc:   # "Home: x, Away: y": the winner tells us which side is which; a draw falls back on the listing order
-            hs, aws = sc
-            if w != "TIE" and hs != aws:
-                loser = a if w == b else b
-                home_code = w if hs > aws else loser
-            else:
-                home_code = b if cfg["group"] in AWAY_FIRST else a
-            away_code = b if home_code == a else a
-            score = {home_code: sc[0], away_code: sc[1]}
-            total = total if total is not None else sc[0] + sc[1]
+        if se.get("s"):   # "Home: x, Away: y": use whichever way round agrees with the team-total lines and the winner
+            hs, aws = se["s"]
+            for home_code in ((b, a) if cfg["group"] in AWAY_FIRST else (a, b)):
+                away_code = b if home_code == a else a
+                cand = {home_code: hs, away_code: aws}
+                ok = all(((cand.get(code, -1) >= line) == bool(r)) for code, line, r in se.get("sk") or [] if code in cand)
+                won = (w == "TIE" and hs == aws) or (w in cand and cand[w] > max(v for k2, v in cand.items() if k2 != w))
+                if ok and won:
+                    score = cand
+                    break
+            if score and total is None:
+                total = float(hs + aws)
         for c, o in ((a, b), (b, a)):
             res = "D" if w == "TIE" else ("W" if w == c else "L")
             s = {"win": 1.0 if res == "W" else 0.0, "wl": {"W": 1.0, "L": -1.0, "D": 0.0}[res],
@@ -255,9 +309,18 @@ def team_history(lg, cfg, past):
             if score:
                 s["tpts"], s["opp_pts"] = float(score[c]), float(score[o])
                 s["margin"] = s["tpts"] - s["opp_pts"]
-            elif mabs is not None:
-                s["margin"] = 0.0 if res == "D" else (mabs if res == "W" else -mabs)
-            if total is not None:
+            else:
+                cand = None if mabs is None else (0.0 if res == "D" else (mabs if res == "W" else -mabs))
+                m_ = pick(cand, *mb[c])
+                if m_ is not None:
+                    s["margin"] = m_
+                tp = pick(None, *bounds([(line, r) for code, line, r in se.get("sk") or [] if code == c]))
+                if tp is not None:
+                    s["tpts"] = tp
+            m_ = s.get("margin")
+            if total is not None and m_ is not None and (total - abs(m_) < 0 or (total - abs(m_)) % 2):
+                s.pop("margin")      # total minus margin is twice the losing score, so it can't be odd or negative
+            if total is not None and abs(s.get("margin", 0)) <= total:
                 s["total"] = float(total)
             if btts is not None:
                 s["btts"] = float(btts)
@@ -317,7 +380,8 @@ def evaluate(lg, cfg, m, q, ev, hist, ctx):
         "home": ctx["home"],
         "k": {"yb": r2(yb, 2), "ya": r2(ya, 2), "last": r2(q.get("last"), 2), "vol": round(q["vol"]) if q.get("vol") else 0},
         "mid": r2(mid, 3),
-        "h": {wn: [v["hit"], v["n"]] for wn, v in summ.items() if isinstance(v, dict) and wn in ("l5", "l10", "l20", "szn", "h2h", "home", "away")},
+        "h": {wn: [v["hit"], v["n"]] for wn, v in summ.items()
+              if isinstance(v, dict) and wn in ("l5", "l10", "l20", "szn", "h2h", "home", "away") and (v["n"] or wn not in ("home", "away"))},
         "strk": summ["streak"], "last10": show, "p": r2(p_model), "pb": r2(p_blend),
         "e": {s: r2(v, 4) for s, v in e.items()}, "best": best, "be": r2(e.get(best), 4) if best else None,
         "conf": conf, "flags": flags,
@@ -344,8 +408,16 @@ def build(today, log):
     t0 = time.time()
     leagues = league_series(log)
     all_series = [(lg, s, kind) for lg, c in leagues.items() for s, kind in c["series"]]
+    empty = cache.get("kalshi/open-empty", EMPTY_TTL) or {}
+    todo = [s for _, s, _ in all_series if not (s in empty and time.time() - empty[s] < EMPTY_TTL)]
     with ThreadPoolExecutor(max_workers=4) as ex:
-        fetched = dict(ex.map(arb.k_fetch, [s for _, s, _ in all_series]))
+        fetched = dict(ex.map(arb.k_fetch, todo))
+    for s_ in todo:
+        if fetched.get(s_):
+            empty.pop(s_, None)
+        else:
+            empty[s_] = time.time()
+    cache.put("kalshi/open-empty", empty)
     lo, hi = (today - dt.timedelta(days=1)).isoformat(), (today + dt.timedelta(days=DAYS_AHEAD)).isoformat()
     events = defaultdict(dict)                      # lg -> event key -> {"date", "codes", "names", "markets": []}
     occur = {}
@@ -364,19 +436,22 @@ def build(today, log):
             ev["markets"].append((p, q, mk.get("event_ticker")))
             occur.setdefault(p["key"], mk.get("occurrence_datetime") or mk.get("expected_expiration_time"))
     live_leagues = [lg for lg in leagues if events.get(lg)]
-    log(f"sports: open games in {len(live_leagues)} leagues, {sum(len(v) for v in events.values())} games "
-        f"({time.time() - t0:.0f}s)")
+    log(f"sports: open games in {len(live_leagues)} leagues, {sum(len(v) for v in events.values())} games, "
+        f"{len(todo)} of {len(all_series)} series checked ({time.time() - t0:.0f}s)")
 
     # settled history only for leagues with games on the board
     want = [(lg, s, kind) for lg, s, kind in all_series if lg in events]
+    want.sort(key=lambda x: cache.entry(f"kalshi/settled3/{x[1]}")[1])      # never fetched (or oldest) first
+    budget = [SETTLED_PAGES]
+
     def get_settled(item):
         lg, s, kind = item
         try:
-            return item, settled(s, kind)
+            return item, settled(s, kind, budget)
         except Exception as e:  # noqa: BLE001
             log(f"sports: settled {s} failed {e!r}"[:200])
-            return item, {}
-    with ThreadPoolExecutor(max_workers=4) as ex:
+            return item, (cache.entry(f"kalshi/settled3/{s}")[0] or {}).get("ev", {})
+    with ThreadPoolExecutor(max_workers=2) as ex:
         past_by = list(ex.map(get_settled, want))
     past = defaultdict(lambda: defaultdict(dict))  # lg -> kind -> event key -> summary
     for (lg, s, kind), evs in past_by:
@@ -387,7 +462,8 @@ def build(today, log):
                     cur.setdefault("n", {}).update(v)
                 else:
                     cur[f] = v
-    log(f"sports: settled history for {len(want)} series ({time.time() - t0:.0f}s)")
+    log(f"sports: settled history for {len(want)} series, {SETTLED_PAGES - budget[0]} pages fetched "
+        f"({time.time() - t0:.0f}s)")
     starts = milestones(log)
 
     now = time.time()
@@ -423,6 +499,7 @@ def build(today, log):
             ev2 = {"key": key, "date": ev["date"], "state": state}
             gid = f"{lg}-{key}"
             union = None
+            ladders = defaultdict(list)
             for p, q, _ in ev["markets"]:
                 yb, ya = q["yb"], q["ya"]
                 if not (yb and ya and 0 < yb < ya < 1) or ya - yb > MAX_SPREAD:
@@ -430,6 +507,9 @@ def build(today, log):
                 mid = (yb + ya) / 2
                 if p["k"] not in ("win", "draw") and not (MIN_PRICE <= mid <= 1 - MIN_PRICE):
                     continue
+                ladders[(p["k"], p["c"])].append((abs(mid - 0.5), p, q))
+            keep = [x for lad in ladders.values() for x in sorted(lad, key=lambda t: t[0])[:LADDER]]
+            for _, p, q in keep:
                 if p["k"] in ("total", "btts", "draw"):
                     entity, pid = "game", f"{lg}-g-{slug(key)}"
                     if union is None:
