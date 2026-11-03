@@ -29,21 +29,94 @@ KALSHI_TAKER = 0.07
 WATCH_MAX = 1.02          # list pairs costing up to $1.02 per $1 payout as "close"
 CONTRACTS = 100           # fee math for a 100-contract order (fees round up per order)
 
+def _L(label, group, game, pm, spread=(), total=(), btts=(), match="loose", three_way=False, props=False, note=None):
+    return {"label": label, "group": group, "game": list(game), "spread": list(spread), "total": list(total),
+            "btts": list(btts), "pm": list(pm), "match": match, "three_way": three_way, "props": props, "note": note}
+
+
+TENNIS_NOTE = "If a player retires mid-match, the two sites may settle differently. Read both sites' rules first."
+FIGHT_NOTE = "Fights can end in a draw or no contest, and the two sites may settle those differently. Read both sites' rules first."
+CRICKET_NOTE = "A tie, no result or abandoned match may settle differently on the two sites. Read both sites' rules first."
+
+# match: "strict" = exact school/city (US teams: Kentucky never pairs with Western Kentucky),
+#        "loose"  = club names ("Manchester United" = "Manchester United FC"), "person" = players and fighters.
 LEAGUES = {
-    "nfl": {"label": "NFL", "game": ["KXNFLGAME"], "spread": ["KXNFLSPREAD"], "total": ["KXNFLTOTAL"], "pm": ["nfl"]},
-    "nba": {"label": "NBA", "game": ["KXNBAGAME"], "spread": ["KXNBASPREAD"], "total": ["KXNBATOTAL"], "pm": ["nba"]},
-    "nhl": {"label": "NHL", "game": ["KXNHLGAME"], "spread": ["KXNHLSPREAD"], "total": ["KXNHLTOTAL"], "pm": ["nhl"]},
-    "cfb": {"label": "College football", "game": ["KXNCAAFGAME"], "spread": ["KXNCAAFSPREAD"], "total": ["KXNCAAFTOTAL"], "pm": ["cfb"]},
-    "cbb": {"label": "College basketball", "game": ["KXNCAAMBGAME"], "spread": ["KXNCAAMBSPREAD"], "total": ["KXNCAAMBTOTAL"], "pm": ["cbb"]},
-    "atp": {"label": "ATP tennis", "game": ["KXATPMATCH", "KXATPCHALLENGERMATCH"], "spread": [], "total": [], "pm": ["atp", "atpcq", "atpc"]},
-    "wta": {"label": "WTA tennis", "game": ["KXWTAMATCH"], "spread": [], "total": [], "pm": ["wta"]},
+    "nfl": _L("NFL", "nfl", ["KXNFLGAME"], ["nfl"], ["KXNFLSPREAD"], ["KXNFLTOTAL"], match="strict", props=True,
+              note="NFL games can end in a tie. If that happens, both team-win contracts can lose, so moneyline pairs aren't risk-free."),
+    "nba": _L("NBA", "nba", ["KXNBAGAME"], ["nba"], ["KXNBASPREAD"], ["KXNBATOTAL"], match="strict", props=True),
+    "nhl": _L("NHL", "nhl", ["KXNHLGAME"], ["nhl"], ["KXNHLSPREAD"], ["KXNHLTOTAL"], match="strict", props=True),
+    "cfb": _L("College football", "cfb", ["KXNCAAFGAME"], ["cfb"], ["KXNCAAFSPREAD"], ["KXNCAAFTOTAL"], match="strict"),
+    "cbb": _L("College basketball", "cbb", ["KXNCAAMBGAME"], ["cbb"], ["KXNCAAMBSPREAD"], ["KXNCAAMBTOTAL"], match="strict"),
+    "wcbb": _L("Women's college basketball", "wcbb", ["KXNCAAWBGAME"], ["wcbb"], ["KXNCAAWBSPREAD"], ["KXNCAAWBTOTAL"], match="strict"),
+    "atp": _L("ATP tennis", "tennis", ["KXATPMATCH", "KXATPCHALLENGERMATCH"], ["atp", "atpcq", "atpc"], match="person", note=TENNIS_NOTE),
+    "wta": _L("WTA tennis", "tennis", ["KXWTAMATCH", "KXWTACHALLENGERMATCH"], ["wta"], match="person", note=TENNIS_NOTE),
+    "itf": _L("ITF tennis", "tennis", ["KXITFMATCH"], ["itfme"], match="person", note=TENNIS_NOTE),
+    "itfw": _L("ITF tennis (women)", "tennis", ["KXITFWMATCH"], ["itfwo"], match="person", note=TENNIS_NOTE),
+    "tdbl": _L("Tennis doubles", "tennis", ["KXATPDOUBLES", "KXATPCHALLENGERDOUBLES", "KXWTADOUBLES"], ["atpdb", "wtadb"],
+               match="pairs", note=TENNIS_NOTE),
+    "ufc": _L("UFC", "fights", ["KXUFCFIGHT"], ["ufc"], match="person", note=FIGHT_NOTE),
+    "boxing": _L("Boxing", "fights", ["KXBOXING"], ["boxing"], match="person", note=FIGHT_NOTE),
+    "cs2": _L("Counter-Strike 2", "esports", ["KXCS2GAME"], ["cs2"]),
+    "dota2": _L("Dota 2", "esports", ["KXDOTA2GAME"], ["dota2"]),
+    "lol": _L("League of Legends", "esports", ["KXLOLGAME"], ["lol"]),
+    "r6": _L("Rainbow Six", "esports", ["KXR6GAME"], ["r6"]),
+    "eurolg": _L("EuroLeague", "hoops", ["KXEUROLEAGUEGAME"], ["eurolg"]),
+    "eurocup": _L("EuroCup", "hoops", ["KXEUROCUPGAME"], ["eurocup"], ["KXEUROCUPSPREAD"], ["KXEUROCUPTOTAL"]),
+    "bcl": _L("Basketball Champions League", "hoops", ["KXFIBACHAMPGAME"], ["bcl"]),
+    "cba": _L("China CBA", "hoops", ["KXCBAGAME"], ["cba"]),
+    "nbl": _L("Australia NBL", "hoops", ["KXNBLGAME"], ["nbl"]),
+    "bbl": _L("Germany BBL", "hoops", ["KXBBLGAME"], ["bbl"]),
+    "vtb": _L("VTB United League", "hoops", ["KXVTBGAME"], ["vtb"]),
+    "koris": _L("Finland Korisliiga", "hoops", ["KXKORISLIIGAGAME"], ["koris"]),
+    "lnbp": _L("Mexico LNBP", "hoops", ["KXLNBPGAME"], ["lnbp"], ["KXLNBPSPREAD"], ["KXLNBPTOTAL"]),
+    "cznbl": _L("Czech NBL", "hoops", ["KXCZENBLGAME"], ["cznbl"]),
+    "kbl": _L("Korea KBL", "hoops", ["KXKBLGAME"], ["kbl"]),
+    "lkl": _L("Lithuania LKL", "hoops", ["KXLKLGAME"], ["lkl"]),
+    "aba": _L("Adriatic ABA League", "hoops", ["KXABAGAME"], ["aba"]),
+    "denbl": _L("Denmark Basketligaen", "hoops", ["KXDBBFGAME"], ["denbl"]),
+    "lnb": _L("France LNB Elite", "hoops", ["KXLNBELITEGAME"], ["lnb"]),
+    "fra2": _L("France Elite 2", "hoops", ["KXLNBELITE2GAME"], ["fra2"]),
+    "khl": _L("KHL", "hockey", ["KXKHLGAME"], ["khl"]),
+    "ahl": _L("AHL", "hockey", ["KXAHLGAME"], ["ahl"]),
+    "kbo": _L("Korea KBO", "baseball", ["KXKBOGAME"], ["kbo"], ["KXKBOSPREAD"], ["KXKBOTOTAL"]),
+    "t20": _L("T20 cricket", "cricket", ["KXT20MATCH"], ["t20icr"], match="loose", note=CRICKET_NOTE),
+    "odi": _L("ODI cricket", "cricket", ["KXODIMATCH"], ["odicr"], match="loose", note=CRICKET_NOTE),
 }
+# Soccer: Kalshi lists win / tie / win as three markets, and so does Polymarket US. Full time = 90 minutes plus stoppage.
+SOCCER = [  # key, label, Kalshi series stem, Polymarket prefixes, Kalshi also has spread/total/both-teams-to-score
+    ("ucl", "Champions League", "KXUCL", ["ucl"], True), ("uel", "Europa League", "KXUEL", ["uel"], True),
+    ("uecl", "Conference League", "KXUECL", ["uecl"], True), ("epl", "Premier League", "KXEPL", ["epl"], True),
+    ("laliga", "La Liga", "KXLALIGA", ["lal"], True), ("seriea", "Serie A", "KXSERIEA", ["sea"], True),
+    ("bundesliga", "Bundesliga", "KXBUNDESLIGA", ["bun"], True), ("ligue1", "Ligue 1", "KXLIGUE1", ["lg1"], True),
+    ("eflch", "EFL Championship", "KXEFLCHAMPIONSHIP", ["eflch"], True), ("efl1", "EFL League One", "KXEFLL1", ["efl1"], True),
+    ("mls", "MLS", "KXMLS", ["mls"], True), ("spl", "Saudi Pro League", "KXSAUDIPL", ["spl"], True),
+    ("j2", "Japan J2 League", "KXJ2LEAGUE", ["j2"], True), ("bra", "Brasileirão", "KXBRASILEIRO", ["bra"], True),
+    ("brb", "Brasileirão Série B", "KXBRASILEIROB", ["brb"], True), ("lco", "Colombia Primera A", "KXDIMAYOR", ["lco"], True),
+    ("par1", "Paraguay Primera", "KXAPFDDH", ["par1"], True), ("chl1", "Chile Primera", "KXCHLLDP", ["pdc"], True),
+    ("pl1", "Peru Liga 1", "KXPERLIGA1", ["pl1"], True), ("alsv", "Allsvenskan", "KXALLSVENSKAN", ["alsv"], True),
+    ("acle", "AFC Champions League", "KXAFCCL", ["acle"], True), ("ecu1", "Ecuador LigaPro", "KXECULP", ["ecu1"], True),
+    ("uru1", "Uruguay Primera", "KXURYPD", ["uru1"], True),
+    ("ligpor", "Liga Portugal", "KXLIGAPORTUGAL", ["ligpor"], False), ("ere", "Eredivisie", "KXEREDIVISIE", ["ere"], False),
+    ("bun2", "2. Bundesliga", "KXBUNDESLIGA2", ["bun2"], False), ("lal2", "La Liga 2", "KXLALIGA2", ["lal2"], False),
+    ("srb", "Serie B", "KXSERIEB", ["srb"], False), ("serc", "Serie C", "KXSERIEC", ["serca", "sercb", "sercc"], False),
+    ("lig2", "Ligue 2", "KXLIGUE2", ["lig2"], False), ("bel1", "Belgian Pro League", "KXBELGIANPL", ["bel1"], False),
+    ("swsl", "Swiss Super League", "KXSWISSLEAGUE", ["swsl"], False), ("atbl", "Austrian Bundesliga", "KXAUTBUNDES", ["atbl"], False),
+    ("nb1", "Hungary NB I", "KXHUNNB1", ["nb1"], False), ("svnp", "Slovenia PrvaLiga", "KXSVNPL", ["svnp"], False),
+    ("hnl", "Croatia HNL", "KXHNL", ["hnl"], False), ("ekst", "Ekstraklasa", "KXEKSTRAKLASA", ["ekst"], False),
+    ("tsl", "Süper Lig", "KXSUPERLIG", ["tsl"], False), ("tff1", "TFF 1. Lig", "KXTFF1LIG", ["tff1"], False),
+    ("uaepl", "UAE Pro League", "KXUAEPL", ["uaepl"], False), ("j1", "Japan J1 League", "KXJLEAGUE", ["j1"], False),
+    ("lpb", "Bolivia Primera", "KXBOLPDIV", ["lpb"], False), ("sld", "Danish Superliga", "KXDENSUPERLIGA", ["sld"], False),
+    ("grsl", "Greece Super League", "KXSLGREECE", ["grsl"], False), ("slr", "Romania SuperLiga", "KXROML1", ["slr"], False),
+    ("flc", "Czech First League", "KXCZEFL", ["flc"], False), ("fnl", "Czech National League", "KXCZEFNL", ["fnl"], False),
+    ("thai1", "Thai League 1", "KXTHAIL1", ["thai1"], False), ("idnsl", "Indonesia Super League", "KXIDNSL", ["idnsl"], False),
+    ("wsl", "Women's Super League", "KXEWSL", ["wsl"], False), ("fbl", "Frauen-Bundesliga", "KXBUNDESLIGAW", ["fbl"], False),
+    ("ligaf", "Liga F", "KXLIGAF", ["ligaf"], False), ("uslc", "USL Championship", "KXUSL", ["uslc"], False),
+]
+for _k, _label, _stem, _pm, _extras in SOCCER:
+    LEAGUES[_k] = _L(_label, "soccer", [_stem + "GAME"], _pm, [_stem + "SPREAD"] if _extras else [],
+                     [_stem + "TOTAL"] if _extras else [], [_stem + "BTTS"] if _extras else [], three_way=True)
 PM_PREFIX = {p: lg for lg, c in LEAGUES.items() for p in c["pm"]}
-RULE_NOTES = {
-    "nfl": "NFL games can end in a tie. If that happens, both team-win contracts can lose, so moneyline pairs aren't risk-free.",
-    "atp": "If a player retires mid-match, the two sites may settle differently. Read both sites' rules first.",
-    "wta": "If a player retires mid-match, the two sites may settle differently. Read both sites' rules first.",
-}
+RULE_NOTES = {lg: c["note"] for lg, c in LEAGUES.items() if c.get("note")}
 
 _log = []
 
@@ -111,6 +184,82 @@ def same_team(k_team, p_team):
                for school in p_team.get("schools") or [])
 
 
+# Club names differ more between the sites ("Everton" / "Everton FC", "Inter" / "Internazionale"), so leagues outside
+# the US compare the distinctive words only. Both teams must still match, on the same date, in the same league.
+GENERIC = {"fc", "cf", "afc", "sc", "ac", "as", "ss", "ssc", "us", "rc", "cd", "ud", "sd", "ca", "club", "de", "del", "la", "el",
+           "fk", "sk", "bk", "if", "ik", "nk", "hnk", "kv", "krc", "sv", "vfb", "vfl", "tsg", "calcio", "futbol", "football",
+           "futebol", "cp", "ec", "esporte", "clube", "the", "team", "esports", "gaming", "e", "bc", "kk", "basket",
+           "basketball", "hc", "and", "w", "women", "wfc", "cfc", "s", "a", "of", "do", "da", "associacao", "sport"}
+
+
+def core(name):
+    t = [x for x in tokens(name) if x not in GENERIC and not x.isdigit()]
+    return t or tokens(name)
+
+
+def _tok_eq(a, b):
+    return a == b or (min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a)))
+
+
+def loose_score(a, b):
+    """2 = same distinctive words, 1 = one name's words all appear in the other's, 0 = different."""
+    x, y = core(a), core(b)
+    if not x or not y:
+        return 0
+    if x == y or sorted(x) == sorted(y):
+        return 2
+    if all(any(_tok_eq(p, q) for q in y) for p in x) or all(any(_tok_eq(q, p) for p in x) for q in y):
+        return 1
+    return 0
+
+
+def person_score(a, b):
+    """Players and fighters: 2 = same full name, 1 = same last name and first initial (or one name inside the other)."""
+    if "," in (b or ""):                       # "Tashiro, Yuga"
+        last, _, first = b.partition(",")
+        b = f"{first} {last}"
+    x, y = tokens(a), tokens(b)
+    if not x or not y:
+        return 0
+    if x == y:
+        return 2
+    if x[-1] == y[-1] and x[0][:1] == y[0][:1]:
+        return 1
+    sx, sy = set(x), set(y)
+    if (sx <= sy or sy <= sx) and len(min(x, y, key=len)) >= 2:
+        return 1
+    return 0
+
+
+def pair_names(s):
+    """'Kubler J / Puttergill C' or 'Quentin Halys / Pierre-Hugues Herbert' -> set of last names."""
+    out = set()
+    for part in (s or "").split("/"):
+        t = [x for x in tokens(part) if len(x) > 1]
+        if not t:
+            return set()
+        # Polymarket writes "Lastname Initial", Kalshi writes "First Last"
+        out.add(t[0] if len(tokens(part)) > len(t) else t[-1])
+    return out
+
+
+def team_score(mode, k_team, p_team):
+    names = [p_team.get("name") or ""] + list(p_team.get("names") or []) + list(p_team.get("schools") or [])
+    kname = k_team.get("name") or ""
+    if mode == "strict":
+        return 2 if same_team(k_team, p_team) else 0
+    if mode == "person":
+        return max((person_score(kname, n) for n in names if n), default=0)
+    if mode == "pairs":
+        a = pair_names(kname)
+        return 2 if a and len(a) == 2 and any(a == pair_names(n) for n in names) else 0
+    code = (k_team.get("code") or "").lower()
+    best = max((loose_score(kname, n) for n in names if n), default=0)
+    if code and len(code) >= 2 and code in {(p_team.get("abbr") or "").lower(), (p_team.get("disp") or "").lower()}:
+        best = max(best, 1) + 1
+    return best
+
+
 # ---------------------------------------------------------------- kalshi
 def k_quote(mk, series):
     return {
@@ -119,6 +268,20 @@ def k_quote(mk, series):
         "yb_n": K.qty(mk, "yes_bid_size"), "ya_n": K.qty(mk, "yes_ask_size"),
         "title": mk.get("title"), "vol": K.qty(mk, "volume"),
     }
+
+
+EVENT_RE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})?([A-Z0-9]+)$")   # 26NOV03 [1430] PENGAM
+
+
+def k_event_date(ev):
+    part = ev.split("-", 1)[1] if "-" in ev else ev
+    m = EVENT_RE.match(part)
+    if not m:
+        return None
+    try:
+        return dt.date(2000 + int(m.group(1)), K.MONTHS[m.group(2)], int(m.group(3)))
+    except (KeyError, ValueError):
+        return None
 
 
 def kalshi_games():
@@ -132,8 +295,8 @@ def kalshi_games():
             log(f"kalshi {series} failed: {e!r}"[:200])
             return series, []
 
-    all_series = [(lg, kind, s) for lg, c in LEAGUES.items() for kind in ("game", "spread", "total") for s in c[kind]]
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    all_series = [(lg, kind, s) for lg, c in LEAGUES.items() for kind in ("game", "spread", "total", "btts") for s in c[kind]]
+    with ThreadPoolExecutor(max_workers=8) as ex:
         fetched = dict(ex.map(fetch, [s for _, _, s in all_series]))
     for lg, kind, s in all_series:
         for mk in fetched.get(s, []):
@@ -141,21 +304,25 @@ def kalshi_games():
                 continue
             ev = mk.get("event_ticker") or ""
             key = ev.split("-", 1)[1] if "-" in ev else ev
-            date, _ = K.parse_event(ev)
+            date = k_event_date(ev)
             if not date:
                 continue
             g = games.setdefault((lg, key), {"league": lg, "key": key, "date": date.isoformat(), "teams": {},
-                                             "ml": {}, "spread": [], "total": [], "events": {}})
+                                             "ml": {}, "tie": None, "btts": None, "spread": [], "total": [], "events": {}})
             g["events"][kind] = ev
             suffix = (mk.get("ticker") or "").rsplit("-", 1)[-1]
             q = k_quote(mk, s)
             if kind == "game":
-                g["teams"].setdefault(suffix, mk.get("yes_sub_title") or mk.get("title") or suffix)
-                g["ml"][suffix] = q
+                sub = (mk.get("yes_sub_title") or "").strip()
+                if suffix == "TIE" or sub.lower() in ("tie", "draw"):
+                    g["tie"] = q
+                else:
+                    g["teams"].setdefault(suffix, sub or mk.get("title") or suffix)
+                    g["ml"][suffix] = q
             elif kind == "spread":
                 code = re.sub(r"\d+$", "", suffix)
                 x = f(mk.get("floor_strike"))
-                m = re.match(r"(.+?) wins by over", mk.get("title") or "")
+                m = re.match(r"(.+?) wins by (?:over|more than)", mk.get("title") or "")
                 if m:
                     g["teams"].setdefault(code, m.group(1).strip())
                 if x is not None:
@@ -164,10 +331,16 @@ def kalshi_games():
                 t = f(mk.get("floor_strike"))
                 if t is not None:
                     g["total"].append((t, q))
+            elif kind == "btts":
+                g["btts"] = q
     today = dt.datetime.now(ET).date()
     out = [g for g in games.values() if len(g["teams"]) == 2
+           and (not LEAGUES[g["league"]]["three_way"] or g["tie"])
            and today - dt.timedelta(days=1) <= dt.date.fromisoformat(g["date"]) <= today + dt.timedelta(days=6)]
-    log(f"kalshi: {len(out)} games " + json.dumps({lg: sum(1 for g in out if g['league'] == lg) for lg in LEAGUES}))
+    by_lg = defaultdict(int)
+    for g in out:
+        by_lg[g["league"]] += 1
+    log(f"kalshi: {len(out)} games from {len(all_series)} series " + json.dumps(by_lg))
     return out
 
 
@@ -342,27 +515,45 @@ def pm_games(now):
         if why:
             SKIPPED[why] += 1
             continue
+        is_ml = lambda m: m.get("marketType") == "moneyline" or (m.get("slug") or "").startswith("aec-")  # noqa: E731
         mascots = {}
         for m in e.get("markets") or []:
-            if m.get("marketType") == "moneyline":
+            if is_ml(m) and LEAGUES[lg]["match"] == "strict":
                 for sd in m.get("marketSides") or []:
                     ab = (sd.get("team") or {}).get("abbreviation")
                     if ab:
                         mascots[ab] = sd.get("description")
         g = {"league": lg, "slug": e.get("slug"), "title": e.get("title"), "start": start, "date": date,
              "teams": [pm_team(t, mascots.get(t.get("abbreviation"))) for t in (e.get("teams") or [])],
-             "ml": None, "spread": [], "total": [], "moved_from": None}
+             "ml": None, "ml3": {}, "btts": None, "spread": [], "total": [], "props": None, "moved_from": None}
         for m in e.get("markets") or []:
-            if m.get("marketType") == "moneyline":
+            sched = None
+            if m.get("sportsMarketType") == "soccer_team_full_time_winner":
+                info = pm_info(m)
+                if not info or (info["long"]["desc"] or "").lower() != "yes":
+                    continue
+                if (m.get("slug") or "").endswith("-draw"):
+                    g["ml3"]["draw"] = info
+                else:
+                    ab = ((m.get("marketSides") or [{}])[0].get("team") or {}).get("abbreviation")
+                    idx = next((i for i, t in enumerate(e.get("teams") or []) if ab and t.get("abbreviation") == ab), None)
+                    if idx is not None:
+                        g["ml3"][idx] = info
+                sched = pm_sched(m.get("question"))
+            elif is_ml(m):
                 info = pm_info(m)
                 if info:
                     g["ml"] = info
                     if not g["teams"]:
                         g["teams"] = [info["long"]["team"], info["short"]["team"]]
                     sched = pm_sched(m.get("question"))
-                    if sched and abs((sched - st).total_seconds()) >= 2 * 3600:
-                        g["moved_from"] = sched.isoformat().replace("+00:00", "Z")  # rain delay, new order of play...
-        if g["ml"] or g["spread"] or g["total"]:
+            if sched and abs((sched - st).total_seconds()) >= 2 * 3600:
+                g["moved_from"] = sched.isoformat().replace("+00:00", "Z")  # rain delay, new order of play...
+        if LEAGUES[lg]["three_way"]:
+            g["ml"] = None
+            if len(g["ml3"]) != 3 or len(g["teams"]) != 2:
+                continue
+        if g["ml"] or g["ml3"]:
             games.append(g)
     log(f"polymarket: {len(games)} pre-game games " + json.dumps({lg: sum(1 for g in games if g['league'] == lg) for lg in LEAGUES})
         + f"; skipped {json.dumps(SKIPPED)}")
@@ -449,32 +640,43 @@ def match(kgames, pgames):
     for g in pgames:
         by_lg[g["league"]].append(g)
     pairs, unmatched = [], []
+    used = defaultdict(list)
     for kg in kgames:
         codes = list(kg["teams"])
         kt = [{"code": c, "name": kg["teams"][c]} for c in codes]
-        best = None
+        mode = LEAGUES[kg["league"]]["match"]
+        tennis = LEAGUES[kg["league"]]["group"] == "tennis"
+        cands = []
         for pg in by_lg.get(kg["league"], []):
             dd = abs((dt.date.fromisoformat(pg["date"]) - dt.date.fromisoformat(kg["date"])).days)
             # tennis order of play shifts by a day or two; team sports keep their date
-            if dd > (2 if kg["league"] in ("atp", "wta") else 1) or len(pg["teams"]) < 2:
+            if dd > (2 if tennis else 1) or len(pg["teams"]) < 2:
                 continue
             p0, p1 = pg["teams"][0], pg["teams"][1]
-            if same_team(kt[0], p0) and same_team(kt[1], p1):
-                assign = {codes[0]: 0, codes[1]: 1}
-            elif same_team(kt[0], p1) and same_team(kt[1], p0):
-                assign = {codes[0]: 1, codes[1]: 0}
-            else:
+            s00, s11 = team_score(mode, kt[0], p0), team_score(mode, kt[1], p1)
+            s01, s10 = team_score(mode, kt[0], p1), team_score(mode, kt[1], p0)
+            fwd = s00 + s11 if s00 and s11 else 0
+            rev = s01 + s10 if s01 and s10 else 0
+            if not fwd and not rev:
                 continue
-            if best is None or dd < best[0]:
-                best = (dd, pg, assign)
-        if best:
-            pairs.append((kg, best[1], best[2]))
+            if fwd == rev:
+                continue                    # can't tell which team is which: skip rather than guess
+            assign = {codes[0]: 0, codes[1]: 1} if fwd > rev else {codes[0]: 1, codes[1]: 0}
+            cands.append((max(fwd, rev), -dd, pg, assign))
+        cands.sort(key=lambda c: (c[0], c[1]), reverse=True)
+        if cands and not (len(cands) > 1 and cands[1][:2] == cands[0][:2] and mode != "strict"):
+            pairs.append((kg, cands[0][2], cands[0][3]))
+            used[cands[0][2]["slug"]].append(kg["key"])
         else:
             near = [f"{pg['title']} [{' | '.join(','.join(t['schools']) + '/' + str(t.get('abbr')) for t in pg['teams'])}]"
                     for pg in by_lg.get(kg["league"], []) if pg["date"] == kg["date"]
                     and any(tokens(n)[:1] == tokens(t["name"])[:1] for n in kg["teams"].values() for t in pg["teams"])][:2]
             unmatched.append(f"{kg['league']} {kg['date']} {' vs '.join(f'{v}/{k}' for k, v in kg['teams'].items())}"
                              + (f"  ~ {near}" if near else ""))
+    dup = {s for s, ks in used.items() if len(ks) > 1}
+    if dup:
+        log(f"dropped {len(dup)} Polymarket events claimed by two Kalshi games: {sorted(dup)[:8]}")
+        pairs = [p for p in pairs if p[1]["slug"] not in dup]
     return pairs, unmatched
 
 
@@ -488,9 +690,129 @@ def pm_side_for_team(info, pg, team_idx):
         if t.get("name") and t.get("name") == target.get("name"):
             return side
     for side in ("long", "short"):  # fall back to names in the side description
-        if name_match(info[side].get("desc") or "", target.get("names") or []):
+        if any(name_match(info[side].get("desc") or "", n) for n in target.get("names") or []):
             return side
     return None
+
+
+# ---------------------------------------------------------------- player props
+# Kalshi prop series (league, stat) -> Polymarket US sportsMarketType. Both mean "at least N":
+# Kalshi "Jaylen Brown: 25+" and Polymarket "astatc-...-pts-jaybro-gte25".
+PROP_PM = {
+    ("nba", "pts"): "basketball_player_points",
+    ("nba", "reb"): "basketball_player_rebounds",
+    ("nba", "ast"): "basketball_player_assists",
+    ("nba", "3pm"): "basketball_player_threes",
+    ("nba", "pra"): "basketball_player_points_rebounds_assists",
+    ("nba", "stl"): "basketball_player_steals",
+    ("nba", "blk"): "basketball_player_blocks",
+    ("nfl", "pass_yds"): "football_player_passing_yards",
+    ("nfl", "pass_tds"): "football_player_passing_touchdowns",
+    ("nfl", "pass_cmp"): "football_player_passing_completions",
+    ("nfl", "pass_att"): "football_player_passing_attempts",
+    ("nfl", "ints"): "football_player_interceptions_thrown",
+    ("nfl", "rush_yds"): "football_player_rushing_yards",
+    ("nfl", "rush_att"): "football_player_rushing_attempts",
+    ("nfl", "rec_yds"): "football_player_receiving_yards",
+    ("nfl", "rec"): "football_player_receptions",
+    ("nfl", "rush_rec_yds"): "football_player_scrimmage_yards",
+    ("nfl", "tds"): "football_player_touchdowns",
+    ("nfl", "rec_long"): "football_player_longest_reception",
+    ("nfl", "rush_long"): "football_player_longest_rush",
+    ("nhl", "goals"): "hockey_player_goals",
+    ("nhl", "points"): "hockey_player_points",
+    ("nhl", "assists"): "hockey_player_assists",
+    # Kalshi's goalie saves have no Polymarket twin: its "team saves" counts every goalie who plays
+}
+PM_PROP_TYPES = set(PROP_PM.values())
+PROP_NOTE = ("If the player doesn't play, the two sites can settle this differently, so a prop pair isn't fully risk-free. "
+             "Check both sites' rules for that.")
+
+
+def kalshi_props(want):
+    """Kalshi player props for the matched games: (league, game key) -> [prop]."""
+    base = K.BASES[0]
+    series = [s for s, (lg, stat, _) in K.SERIES.items() if (lg, stat) in PROP_PM and lg in {k[0] for k in want}]
+
+    def fetch(s):
+        try:
+            return s, K.fetch_series(base, s)
+        except Exception as e:  # noqa: BLE001
+            log(f"kalshi {s} failed: {e!r}"[:200])
+            return s, []
+
+    out = defaultdict(list)
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        for s, mks in ex.map(fetch, series):
+            lg, stat, label = K.SERIES[s]
+            for mk in mks:
+                if mk.get("status") not in ("active", "open", None):
+                    continue
+                p = K.parse_market(s, mk)
+                if not p:
+                    continue
+                ev = mk.get("event_ticker") or ""
+                key = ev.split("-", 1)[1] if "-" in ev else ev
+                if (lg, key) in want:
+                    out[(lg, key)].append({"stat": stat, "label": label, "name": p["player_name"], "n": p["line"],
+                                           "ptype": PROP_PM[(lg, stat)], "q": k_quote(mk, s)})
+    log(f"kalshi props on matched games: {sum(len(v) for v in out.values())} in {len(out)} games")
+    return out
+
+
+def pm_event_markets(slug):
+    try:
+        d = get_json(f"{PM}/v1/events/slug/{slug}", timeout=45)
+        return (d.get("event") or d).get("markets") or []
+    except Exception as e:  # noqa: BLE001
+        log(f"pm event {slug} failed: {e!r}"[:200])
+        return []
+
+
+def pm_prop(m):
+    """A Polymarket US player prop ('Will X record at least N ...?') -> info with player and N, else None."""
+    if m.get("sportsMarketType") not in PM_PROP_TYPES:
+        return None
+    info = pm_info(m)
+    if not info or (info["long"]["desc"] or "").strip().lower() != "yes":
+        return None
+    n = f(m.get("line"))
+    name = None
+    mm = re.match(r"^Will (.+?) (?:record|score|have|make|throw) at least (\d+)", m.get("question") or "")
+    if mm:
+        name, n = mm.group(1), n if n is not None else float(mm.group(2))
+    else:
+        mm = re.match(r"^(.+?) (\d+)\+ ", (m.get("title") or "") + " ")
+        if mm:
+            name, n = mm.group(1), n if n is not None else float(mm.group(2))
+    if not name or n is None or abs(n - round(n)) > 1e-6:
+        return None
+    info.update({"ptype": m.get("sportsMarketType"), "player": name, "n": int(round(n)), "title": m.get("title")})
+    return info
+
+
+def prop_index(infos):
+    """(type, full name, N) -> info, plus a looser (type, last name, first initial, N) index used only when unique."""
+    exact, loose = {}, defaultdict(list)
+    for i in infos:
+        t = tokens(i["player"])
+        if not t:
+            continue
+        exact[(i["ptype"], " ".join(t), i["n"])] = i
+        loose[(i["ptype"], t[-1], t[0][:1], i["n"])].append(i)
+    return exact, loose
+
+
+def prop_lookup(idx, kp):
+    exact, loose = idx
+    t = tokens(kp["name"])
+    if not t:
+        return None
+    hit = exact.get((kp["ptype"], " ".join(t), kp["n"]))
+    if hit:
+        return hit
+    cands = loose.get((kp["ptype"], t[-1], t[0][:1], kp["n"])) or []
+    return cands[0] if len(cands) == 1 else None
 
 
 # ---------------------------------------------------------------- evaluate
@@ -555,6 +877,42 @@ def evaluate(pairs, quotes):
                           (pp, pside, info, f"{info[pside]['desc'] or names[other]} to win", pq), start)
                 if r:
                     found.append(r)
+        # soccer: win / draw / win are three yes-no markets on both sites. Pair each one with its own opposite:
+        # Kalshi "Arsenal wins" Yes + Polymarket "Arsenal wins" No, and the reverse. (Never "No on the other team":
+        # with a draw possible, that isn't the same bet.)
+        if pg.get("ml3") and len(kg["ml"]) == 2 and kg.get("tie"):
+            outcomes = [(kg["ml"][c], pg["ml3"].get(assign[c]), f"{names[c]} wins", f"{names[c]} doesn't win") for c in codes]
+            outcomes.append((kg["tie"], pg["ml3"].get("draw"), "Draw", "No draw"))
+            for kq, info, yes_lab, no_lab in outcomes:
+                if not kq or not info:
+                    continue
+                pq = quotes.get(info["slug"]) or info["quote"]
+                for kleg, klab, pside, plab in ((k_buy_yes(kq), yes_lab, "short", no_lab),
+                                                (k_buy_no(kq), no_lab, "long", yes_lab)):
+                    if not kleg:
+                        continue
+                    note("Moneyline", kleg[0], pm_buy(pq, pside), info["fee"])
+                    r = combo(lg, "Moneyline", None, kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
+                              (pm_buy(pq, pside), pside, info, plab, pq), start)
+                    if r:
+                        r["p"]["btn"] = "Yes" if pside == "long" else "No"
+                        r["p"]["means"] = plab
+                        found.append(r)
+        # both teams to score (soccer)
+        if kg.get("btts") and pg.get("btts"):
+            kq, info = kg["btts"], pg["btts"]
+            pq = quotes.get(info["slug"]) or info["quote"]
+            for kleg, klab, pside, plab in ((k_buy_yes(kq), "Both teams score", "short", "Not both teams score"),
+                                            (k_buy_no(kq), "Not both teams score", "long", "Both teams score")):
+                if not kleg:
+                    continue
+                note("Both teams to score", kleg[0], pm_buy(pq, pside), info["fee"])
+                r = combo(lg, "Both teams to score", None, kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
+                          (pm_buy(pq, pside), pside, info, plab, pq), start)
+                if r:
+                    r["p"]["btn"] = "Yes" if pside == "long" else "No"
+                    r["p"]["means"] = plab
+                    found.append(r)
         # spreads: Kalshi "A wins by over X" = A -X ; No = B +X
         for code, x, kq in kg["spread"]:
             if code not in assign:
@@ -598,6 +956,30 @@ def evaluate(pairs, quotes):
                               (pm_buy(pq, pside), pside, info, plab, pq), start)
                     if r:
                         found.append(r)
+        # player props: Kalshi "X: N+" Yes + Polymarket "X at least N" No, and the reverse
+        idx = pg.get("props")
+        for kp in kg.get("props") or []:
+            if not idx:
+                break
+            info = prop_lookup(idx, kp)
+            if not info:
+                continue
+            STATS["prop_matches"]["pairs"] += 1
+            kq, n, who, what = kp["q"], kp["n"], kp["name"], kp["label"].lower()
+            yes_lab, no_lab = f"{who} {n}+ {what}", f"{who} under {n} {what}"
+            pq = quotes.get(info["slug"]) or info["quote"]
+            for kleg, klab, pside, plab in ((k_buy_yes(kq), yes_lab, "short", no_lab),
+                                            (k_buy_no(kq), no_lab, "long", yes_lab)):
+                if not kleg:
+                    continue
+                note("Player prop", kleg[0], pm_buy(pq, pside), info["fee"])
+                r = combo(lg, "Player prop", f"{kp['label']} {n}+", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
+                          (pm_buy(pq, pside), pside, info, plab, pq), start)
+                if r:
+                    r["p"]["btn"] = "Yes" if pside == "long" else "No"
+                    r["p"]["means"] = plab
+                    r["note"] = PROP_NOTE
+                    found.append(r)
     found.sort(key=lambda r: r["per"])
     return found
 
@@ -616,20 +998,53 @@ def main():
         def live(q):  # a Kalshi line worth pricing: some real quote between 3c and 97c
             return any(x is not None and 0.03 <= x <= 0.97 for x in (q.get("ya"), q.get("yb")))
 
+        # player props: Kalshi lists them for games in the next day or two; Polymarket US only shows them on the
+        # full event, so those games are fetched whole (that also brings every spread and total line)
+        prop_keys = {(kg["league"], kg["key"]) for kg, _, _ in pairs if LEAGUES[kg["league"]]["props"]}
+        kprops = kalshi_props(prop_keys) if prop_keys else {}
+        full_for = [(kg, pg) for kg, pg, _ in pairs if kprops.get((kg["league"], kg["key"]))]
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            full = dict(zip([pg["slug"] for _, pg in full_for], ex.map(pm_event_markets, [pg["slug"] for _, pg in full_for])))
+        log(f"polymarket: fetched {len(full)} full events for props ({sum(len(v) for v in full.values())} markets)")
+
         want = []
         for kg, pg, _ in pairs:
+            kg["props"] = kprops.get((kg["league"], kg["key"])) or []
+            base = pg["slug"]
+            if pg["slug"] in full:
+                continue
             if pg["ml"]:
                 want.append(pg["ml"]["slug"])
-            base = pg["slug"]
+            want += [i["slug"] for i in pg["ml3"].values()]
             for x in sorted({x for _, x, q in kg["spread"] if live(q)}):
                 want += [f"asc-{base}-pos-{slug_num(x)}", f"asc-{base}-neg-{slug_num(x)}"]
             for t in sorted({t for t, q in kg["total"] if live(q)}):
                 want.append(f"tsc-{base}-{slug_num(t)}")
+            if kg.get("btts"):
+                want.append(f"astatc-{base}-btts")
         markets = pm_markets_by_slug(want)
+        for ms in full.values():
+            for m in ms:
+                markets[m.get("slug")] = m
         result["p_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
         quotes = {}
+        n_pm_props = 0
         for kg, pg, _ in pairs:
             base = pg["slug"]
+            if base in full:
+                infos = [i for i in (pm_prop(m) for m in full[base]) if i]
+                pg["props"] = prop_index(infos) if infos else None
+                n_pm_props += len(infos)
+                for i in infos:
+                    quotes[i["slug"]] = i["quote"]
+            bm = markets.get(f"astatc-{base}-btts")
+            if bm:
+                pg["btts"] = pm_info(bm)
+                if pg["btts"]:
+                    quotes[bm["slug"]] = pg["btts"]["quote"]
+            for info in pg["ml3"].values():
+                m = markets.get(info["slug"])
+                quotes[info["slug"]] = (quote_val(m.get("bestBidQuote")), quote_val(m.get("bestAskQuote"))) if m else info["quote"]
             pg["spread"], pg["total"] = [], []
             for slug_, m in ((x, markets.get(x)) for x in [f"asc-{base}-pos-{slug_num(v)}" for _, v, _ in kg["spread"]]
                              + [f"asc-{base}-neg-{slug_num(v)}" for _, v, _ in kg["spread"]]):
@@ -648,7 +1063,7 @@ def main():
                 quotes[info["slug"]] = (quote_val(m.get("bestBidQuote")), quote_val(m.get("bestAskQuote"))) if m else info["quote"]
         opps = evaluate(pairs, quotes)
         # sizes on the Polymarket side for anything worth showing
-        top = opps[:120]
+        top = opps[:200]
         slugs_top = list(dict.fromkeys(o["p"]["slug"] for o in top))
         with ThreadPoolExecutor(max_workers=6) as ex:
             qty = dict(zip(slugs_top, ex.map(pm_top_qty, slugs_top)))
@@ -658,10 +1073,16 @@ def main():
             o["p"]["size"] = size if size and size > 0 else None
         counts = {}
         for lg in LEAGUES:
-            counts[lg] = {"kalshi": sum(1 for g in kgames if g["league"] == lg),
-                          "poly": sum(1 for g in pgames if g["league"] == lg),
-                          "matched": sum(1 for kg, _, _ in pairs if kg["league"] == lg)}
-        result.update({"ok": True, "opps": top, "counts": counts, "n_arbs": sum(1 for o in opps if o["per"] < 1),
+            c = {"kalshi": sum(1 for g in kgames if g["league"] == lg),
+                 "poly": sum(1 for g in pgames if g["league"] == lg),
+                 "matched": sum(1 for kg, _, _ in pairs if kg["league"] == lg)}
+            if any(c.values()):
+                counts[lg] = c
+        leagues = {lg: {"label": c["label"], "group": c["group"]} for lg, c in LEAGUES.items()}
+        log(f"props: Kalshi {sum(len(v) for v in kprops.values())} on {len(kprops)} games, Polymarket {n_pm_props}, "
+            f"matched {STATS['prop_matches']['pairs']}")
+        STATS.pop("prop_matches", None)
+        result.update({"ok": True, "opps": top, "counts": counts, "leagues": leagues, "n_arbs": sum(1 for o in opps if o["per"] < 1),
                        "n_close": len(opps), "checked": {k: v["pairs"] for k, v in STATS.items()},
                        "best": {k: v["best"] for k, v in STATS.items()}, "secs": round(time.time() - t0, 1),
                        "k_at": k_at.isoformat(timespec="seconds"), "skipped": dict(SKIPPED)})

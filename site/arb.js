@@ -5,9 +5,14 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const PM = 'https://gateway.polymarket.us';
   const ACTIONS = 'https://github.com/jakegrayyt-ai/prop-finder/actions/workflows/update.yml';
-  const LEAGUES = [['all', 'All'], ['nfl', 'NFL'], ['nba', 'NBA'], ['nhl', 'NHL'], ['cfb', 'College football'], ['cbb', 'College basketball'], ['atp', 'ATP'], ['wta', 'WTA']];
-  const SHORT = { nfl: 'NFL', nba: 'NBA', nhl: 'NHL', cfb: 'College football', cbb: 'College basketball', atp: 'ATP tennis', wta: 'WTA tennis' };
-  const TENNIS = new Set(['atp', 'wta']);
+  // Sport groups for the chips. Each card still names its own league ("Premier League", "ITF tennis"...).
+  const GROUPS = [['all', 'All'], ['nfl', 'NFL'], ['nba', 'NBA'], ['nhl', 'NHL'], ['cfb', 'College football'],
+    ['cbb', 'College basketball'], ['wcbb', 'Women’s college basketball'], ['soccer', 'Soccer'], ['tennis', 'Tennis'],
+    ['fights', 'UFC & boxing'], ['esports', 'Esports'], ['hoops', 'Basketball, other leagues'], ['hockey', 'Hockey, other leagues'],
+    ['baseball', 'Baseball'], ['cricket', 'Cricket']];
+  const OLD = { nfl: 'nfl', nba: 'nba', nhl: 'nhl', cfb: 'cfb', cbb: 'cbb', atp: 'tennis', wta: 'tennis' };
+  const groupOf = (lg) => ((D.leagues || {})[lg] || {}).group || OLD[lg] || lg;
+  const leagueName = (lg) => ((D.leagues || {})[lg] || {}).label || lg.toUpperCase();
   const PAGE = 40;
   const FRESH_MIN = 15;     // a Kalshi price older than this can't confirm an arbitrage
   const MOVE = 0.02;        // Polymarket moving this much since the scan means Kalshi has probably moved too
@@ -76,7 +81,7 @@
 
   // Games drop off a couple of minutes before they start. Tennis start times are estimates, so 20 minutes early.
   const startMs = (o) => { const t = Date.parse(o.startLive || o.start); return Number.isFinite(t) ? t : null; };
-  const started = (o) => { const t = startMs(o); return t != null && t <= Date.now() + (TENNIS.has(o.lg) ? 20 : 2) * 60000; };
+  const started = (o) => { const t = startMs(o); return t != null && t <= Date.now() + (groupOf(o.lg) === 'tennis' ? 20 : 2) * 60000; };
   const visible = () => D.opps.filter((o) => !started(o));
 
   // ------------------------------------------------------------ formatting
@@ -101,11 +106,11 @@
     : n <= 0 ? 'Nothing left at this price'
       : n < 1 ? 'Less than 1 contract available'
       : `${Math.floor(n).toLocaleString()} available${live ? '' : ' at the scan'}`);
-  const kindTxt = (o) => (o.kind === 'Moneyline' ? 'Moneyline' : `${o.kind} ${o.line}`);
+  const kindTxt = (o) => (o.kind === 'Player prop' ? `Player prop, ${o.line}` : o.line == null ? o.kind : `${o.kind} ${o.line}`);
 
   // ------------------------------------------------------------ render
   function filtered() {
-    return visible().filter((o) => (S.league === 'all' || o.lg === S.league) && (S.kind === 'all' || o.kind === S.kind) &&
+    return visible().filter((o) => (S.league === 'all' || groupOf(o.lg) === S.league) && (S.kind === 'all' || o.kind === S.kind) &&
       (!S.onlyArb || ['arb', 'maybe'].includes(judge(o).s))).sort((a, b) => rank(a) - rank(b) || a.per - b.per);
   }
   const rank = (o) => ({ arb: 0, maybe: 1, close: 2, gone: 3 }[judge(o).s]);
@@ -113,6 +118,8 @@
   function renderSummary() {
     const c = D.counts || {};
     const games = Object.values(c).reduce((a, v) => a + (v.matched || 0), 0);
+    const byGroup = {};
+    for (const [lg, v] of Object.entries(c)) byGroup[groupOf(lg)] = (byGroup[groupOf(lg)] || 0) + (v.matched || 0);
     const checked = Object.values(D.checked || {}).reduce((a, v) => a + v, 0);
     const vis = visible();
     const hidden = D.opps.length - vis.length;
@@ -136,14 +143,14 @@
       : '';
     $('#summary').innerHTML = `<p class="lead">${lead}</p>${stale}
       <p class="sub">${checked ? `Checked ${checked.toLocaleString()} opposite-bet pairs across ` : 'Compared '}${games.toLocaleString()} upcoming games listed on both Kalshi and Polymarket US.${hidden ? ` ${hidden} ${hidden === 1 ? 'pair is' : 'pairs are'} hidden because the game has started or is about to.` : ''}</p>
-      <ul class="arb-counts">${LEAGUES.slice(1).map(([k, n]) => c[k] && c[k].matched ? `<li><b>${c[k].matched}</b> ${esc(n)} ${c[k].matched === 1 ? 'game' : 'games'}</li>` : '').join('')}</ul>`;
+      <ul class="arb-counts">${GROUPS.slice(1).map(([g, n]) => { const m = byGroup[g] || 0; return m ? `<li><b>${m.toLocaleString()}</b> ${esc(n)}</li>` : ''; }).join('')}</ul>`;
   }
 
   function renderLeagues() {
     const vis = visible();
     const n = { all: vis.length };
-    for (const o of vis) n[o.lg] = (n[o.lg] || 0) + 1;
-    $('#leagues').innerHTML = LEAGUES.filter(([k]) => k === 'all' || n[k] || S.league === k)
+    for (const o of vis) n[groupOf(o.lg)] = (n[groupOf(o.lg)] || 0) + 1;
+    $('#leagues').innerHTML = GROUPS.filter(([k]) => k === 'all' || n[k] || S.league === k)
       .map(([k, name]) => `<button type="button" data-lg="${k}" aria-pressed="${S.league === k}">${esc(name)}<span class="ct">${n[k] || 0}</span></button>`).join('');
   }
 
@@ -183,7 +190,7 @@
     const moved = o.moved_from
       ? `<p class="note">Rescheduled. Polymarket first listed it for ${esc(fmtWhen(o.moved_from))}. Kalshi’s page may still show the old date.</p>` : '';
     return `<article class="arb${cls}">
-      <div class="arb-head"><span class="lgtag">${esc(SHORT[o.lg] || o.lg)}</span><span>${esc(kindTxt(o))}</span><span class="when">${esc(fmtWhen(o.startLive || o.start))}</span></div>
+      <div class="arb-head"><span class="lgtag">${esc(leagueName(o.lg))}</span><span>${esc(kindTxt(o))}</span><span class="when">${esc(fmtWhen(o.startLive || o.start))}</span></div>
       <h2 class="arb-game">${esc(o.game)}</h2>
       <div class="legs">
         <div class="leg">
@@ -197,8 +204,9 @@
         </div>
         <div class="leg">
           <span class="site">Polymarket US</span>
-          <div class="buy"><b>Buy ${esc(o.p.label)}</b><span class="px">${cents(o.p.price)}</span></div>
+          <div class="buy"><b>Buy ${esc(o.p.btn || o.p.label)}</b><span class="px">${cents(o.p.price)}</span></div>
           <p class="mk">${esc(o.p.market)}</p>
+          ${o.p.means ? `<p class="means">Means: ${esc(o.p.means)}</p>` : ''}
           <p class="meta2${o.p.move != null && Math.abs(o.p.move) >= MOVE - 1e-9 ? ' old' : ''}">${esc(pmNow(o))}</p>
           <p class="meta2">Fee about ${cents(pFee100)}. ${esc(sizeTxt(o.p.size, !!o.p.sizeAt))}</p>
           <p class="go muted">Find this market in the Polymarket US app.</p>
