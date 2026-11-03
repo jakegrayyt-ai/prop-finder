@@ -36,6 +36,9 @@
         <option value="Moneyline">Moneyline</option>
         <option value="Spread">Spread</option>
         <option value="Total">Total</option>
+        <option value="1st half spread">1st half spread</option>
+        <option value="1st half total">1st half total</option>
+        <option value="Team total">Team total</option>
         <option value="Player prop">Player prop</option>
         <option value="Both teams to score">Both teams to score</option>
       </select>
@@ -49,9 +52,10 @@
   <details class="key">
     <summary>How this works</summary>
     <p>For every game listed on both Kalshi and Polymarket US, the scanner prices each pair of opposite bets, like Team A on one site and Team B on the other. If the two prices plus both sites’ taker fees add up to less than $1 per contract, one side pays $1 whatever happens. That’s an arbitrage.</p>
-    <p>It covers every sport both sites list: NFL, NBA, NHL, college football and basketball (men’s and women’s), about 50 soccer leagues, ATP, WTA, ITF and doubles tennis, UFC, boxing, esports, and basketball, hockey, baseball and cricket leagues abroad. It also pairs NBA, NFL and NHL player props (Kalshi’s “25+ points” against Polymarket’s “at least 25 points”). Soccer is win, draw or win on both sites, so each outcome is paired with its own opposite (Arsenal wins on one site, Arsenal doesn’t win on the other).</p>
+    <p>It covers every sport both sites list: NFL, NBA, NHL, college football and basketball (men’s and women’s), about 50 soccer leagues, ATP, WTA, ITF and doubles tennis, UFC, boxing, esports, and basketball, hockey, baseball and cricket leagues abroad. Bet types: moneylines, spreads and totals for the full game and the first half, team totals, both teams to score, and NBA, NFL and NHL player props (Kalshi’s “25+ points” against Polymarket’s “at least 25 points”). Soccer is win, draw or win on both sites, so each outcome is paired with its own opposite (Arsenal wins on one site, Arsenal doesn’t win on the other).</p>
     <p>Kalshi’s fee is 7% × price × (1 − price) per contract. Polymarket US lists a fee rate on each market (currently 6.95%) and uses the same formula. Both round up to the next cent per order. If Polymarket US actually charges less, real profits are a little better than shown.</p>
     <p>Kalshi doesn’t let other websites read its prices, so Kalshi prices come from the last scan. GitHub runs that scan when it has room, usually every 10 to 60 minutes. Polymarket US prices re-check every 30 seconds, but a newer Polymarket price can only make a pair look worse, never better, because Kalshi has probably moved too.</p>
+    <p>Polymarket’s best price is often a tiny leftover order, a hundredth of a contract that can’t be traded. So the scanner prices each pair at what 1 full contract really costs, and drops pairs that don’t have that much.</p>
     <p>A pair is marked as arbitrage only when Kalshi’s price is under 15 minutes old, Polymarket hasn’t moved 2¢ or more since the scan, and at least 1 contract is available on each side. Pairs that miss one of those are marked “re-check” and say why.</p>
     <p>Games Polymarket shows as live are left out. Cards disappear 2 minutes before the start, or 20 minutes before for tennis, whose start times are estimates.</p>
   </details>

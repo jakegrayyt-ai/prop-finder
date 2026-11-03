@@ -266,19 +266,27 @@
     return quotes;
   }
 
+  // Walk the book: the best bid or ask is often a dust order (0.01 of a contract) that can't be traded.
   async function refreshBook(o) {
     try {
       const res = await fetch(`${PM}/v1/markets/${encodeURIComponent(o.p.slug)}/book`, { cache: 'no-store' });
       if (!res.ok) return;
       const md = (await res.json()).marketData || {};
-      let qty = 0;
-      if (o.p.side === 'long') {
-        for (const l of md.offers || []) if (parseFloat((l.px || {}).value) <= o.p.price + 1e-9) qty += parseFloat(l.qty) || 0;
-      } else {
-        for (const l of md.bids || []) if (1 - parseFloat((l.px || {}).value) <= o.p.price + 1e-9) qty += parseFloat(l.qty) || 0;
-      }
-      o.p.size = qty;
+      const lv = (rows) => (rows || []).map((r) => [parseFloat((r.px || {}).value), parseFloat(r.qty)]).filter(([p, q]) => p > 0 && q > 0);
+      const long = o.p.side === 'long';
+      const levels = long ? lv(md.offers).sort((a, b) => a[0] - b[0]) : lv(md.bids).sort((a, b) => b[0] - a[0]);
+      const cost = (p) => (long ? p : 1 - p);
+      let cum = 0, fill = null;
+      for (const [p, q] of levels) { cum += q; if (cum >= 1 - 1e-9) { fill = cost(p); break; } }
       o.p.sizeAt = Date.now();
+      if (fill == null) { o.p.size = cum; return; }                 // under 1 contract on the whole book
+      o.p.size = levels.filter(([p]) => cost(p) <= fill + 1e-9).reduce((a, [, q]) => a + q, 0);
+      if (fill > o.p.price + 1e-9) {
+        o.p.now = Math.round(fill * 10000) / 10000;
+        o.p.move = o.p.now - o.p.scan;
+        o.p.price = Math.max(o.p.scan, o.p.now);
+        recompute(o);
+      }
     } catch (e) { /* keep the scan's size */ }
   }
 

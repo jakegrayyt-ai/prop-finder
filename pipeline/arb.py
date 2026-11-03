@@ -29,9 +29,13 @@ KALSHI_TAKER = 0.07
 WATCH_MAX = 1.02          # list pairs costing up to $1.02 per $1 payout as "close"
 CONTRACTS = 100           # fee math for a 100-contract order (fees round up per order)
 
-def _L(label, group, game, pm, spread=(), total=(), btts=(), match="loose", three_way=False, props=False, note=None):
+def _L(label, group, game, pm, spread=(), total=(), btts=(), match="loose", three_way=False, props=False, note=None,
+       spread1h=(), total1h=(), teamtotal=(), half="fh", tt=None):
     return {"label": label, "group": group, "game": list(game), "spread": list(spread), "total": list(total),
-            "btts": list(btts), "pm": list(pm), "match": match, "three_way": three_way, "props": props, "note": note}
+            "btts": list(btts), "pm": list(pm), "match": match, "three_way": three_way, "props": props, "note": note,
+            "spread1h": list(spread1h), "total1h": list(total1h), "teamtotal": list(teamtotal),
+            "half": half,   # Polymarket's first-half slug part: "fh" (basketball, soccer) or "1h" (football)
+            "tt": tt}       # Polymarket's team-total slug pattern
 
 
 TENNIS_NOTE = "If a player retires mid-match, the two sites may settle differently. Read both sites' rules first."
@@ -42,11 +46,16 @@ CRICKET_NOTE = "A tie, no result or abandoned match may settle differently on th
 #        "loose"  = club names ("Manchester United" = "Manchester United FC"), "person" = players and fighters.
 LEAGUES = {
     "nfl": _L("NFL", "nfl", ["KXNFLGAME"], ["nfl"], ["KXNFLSPREAD"], ["KXNFLTOTAL"], match="strict", props=True,
+              spread1h=["KXNFL1HSPREAD"], total1h=["KXNFL1HTOTAL"], half="1h",
               note="NFL games can end in a tie. If that happens, both team-win contracts can lose, so moneyline pairs aren't risk-free."),
-    "nba": _L("NBA", "nba", ["KXNBAGAME"], ["nba"], ["KXNBASPREAD"], ["KXNBATOTAL"], match="strict", props=True),
-    "nhl": _L("NHL", "nhl", ["KXNHLGAME"], ["nhl"], ["KXNHLSPREAD"], ["KXNHLTOTAL"], match="strict", props=True),
-    "cfb": _L("College football", "cfb", ["KXNCAAFGAME"], ["cfb"], ["KXNCAAFSPREAD"], ["KXNCAAFTOTAL"], match="strict"),
-    "cbb": _L("College basketball", "cbb", ["KXNCAAMBGAME"], ["cbb"], ["KXNCAAMBSPREAD"], ["KXNCAAMBTOTAL"], match="strict"),
+    "nba": _L("NBA", "nba", ["KXNBAGAME"], ["nba"], ["KXNBASPREAD"], ["KXNBATOTAL"], match="strict", props=True,
+              spread1h=["KXNBA1HSPREAD"], total1h=["KXNBA1HTOTAL"], teamtotal=["KXNBATEAMTOTAL"], tt="tt-{abbr}-fg-{t}"),
+    "nhl": _L("NHL", "nhl", ["KXNHLGAME"], ["nhl"], ["KXNHLSPREAD"], ["KXNHLTOTAL"], match="strict", props=True,
+              teamtotal=["KXNHLTEAMTOTAL"], tt="tt-{abbr}-{t}"),
+    "cfb": _L("College football", "cfb", ["KXNCAAFGAME"], ["cfb"], ["KXNCAAFSPREAD"], ["KXNCAAFTOTAL"], match="strict",
+              spread1h=["KXNCAAF1HSPREAD"], total1h=["KXNCAAF1HTOTAL"], half="1h"),
+    "cbb": _L("College basketball", "cbb", ["KXNCAAMBGAME"], ["cbb"], ["KXNCAAMBSPREAD"], ["KXNCAAMBTOTAL"], match="strict",
+              spread1h=["KXNCAAMB1HSPREAD"], total1h=["KXNCAAMB1HTOTAL"]),
     "wcbb": _L("Women's college basketball", "wcbb", ["KXNCAAWBGAME"], ["wcbb"], ["KXNCAAWBSPREAD"], ["KXNCAAWBTOTAL"], match="strict"),
     "atp": _L("ATP tennis", "tennis", ["KXATPMATCH", "KXATPCHALLENGERMATCH"], ["atp", "atpcq", "atpc"], match="person", note=TENNIS_NOTE),
     "wta": _L("WTA tennis", "tennis", ["KXWTAMATCH", "KXWTACHALLENGERMATCH"], ["wta"], match="person", note=TENNIS_NOTE),
@@ -112,9 +121,12 @@ SOCCER = [  # key, label, Kalshi series stem, Polymarket prefixes, Kalshi also h
     ("wsl", "Women's Super League", "KXEWSL", ["wsl"], False), ("fbl", "Frauen-Bundesliga", "KXBUNDESLIGAW", ["fbl"], False),
     ("ligaf", "Liga F", "KXLIGAF", ["ligaf"], False), ("uslc", "USL Championship", "KXUSL", ["uslc"], False),
 ]
+SOCCER_1H = {"KXUCL", "KXUEL", "KXEFLCHAMPIONSHIP", "KXAFCCL", "KXBRASILEIRO", "KXEFLL1"}   # Kalshi first-half lines
 for _k, _label, _stem, _pm, _extras in SOCCER:
     LEAGUES[_k] = _L(_label, "soccer", [_stem + "GAME"], _pm, [_stem + "SPREAD"] if _extras else [],
-                     [_stem + "TOTAL"] if _extras else [], [_stem + "BTTS"] if _extras else [], three_way=True)
+                     [_stem + "TOTAL"] if _extras else [], [_stem + "BTTS"] if _extras else [], three_way=True,
+                     spread1h=[_stem + "1HSPREAD"] if _stem in SOCCER_1H else [],
+                     total1h=[_stem + "1HTOTAL"] if _stem in SOCCER_1H else [])
 PM_PREFIX = {p: lg for lg, c in LEAGUES.items() for p in c["pm"]}
 RULE_NOTES = {lg: c["note"] for lg, c in LEAGUES.items() if c.get("note")}
 
@@ -295,7 +307,8 @@ def kalshi_games():
             log(f"kalshi {series} failed: {e!r}"[:200])
             return series, []
 
-    all_series = [(lg, kind, s) for lg, c in LEAGUES.items() for kind in ("game", "spread", "total", "btts") for s in c[kind]]
+    kinds = ("game", "spread", "total", "btts", "spread1h", "total1h", "teamtotal")
+    all_series = [(lg, kind, s) for lg, c in LEAGUES.items() for kind in kinds for s in c[kind]]
     with ThreadPoolExecutor(max_workers=8) as ex:
         fetched = dict(ex.map(fetch, [s for _, _, s in all_series]))
     for lg, kind, s in all_series:
@@ -308,7 +321,8 @@ def kalshi_games():
             if not date:
                 continue
             g = games.setdefault((lg, key), {"league": lg, "key": key, "date": date.isoformat(), "teams": {},
-                                             "ml": {}, "tie": None, "btts": None, "spread": [], "total": [], "events": {}})
+                                             "ml": {}, "tie": None, "btts": None, "spread": [], "total": [],
+                                             "spread1h": [], "total1h": [], "teamtotal": [], "events": {}})
             g["events"][kind] = ev
             suffix = (mk.get("ticker") or "").rsplit("-", 1)[-1]
             q = k_quote(mk, s)
@@ -319,18 +333,23 @@ def kalshi_games():
                 else:
                     g["teams"].setdefault(suffix, sub or mk.get("title") or suffix)
                     g["ml"][suffix] = q
-            elif kind == "spread":
+            elif kind in ("spread", "spread1h"):
                 code = re.sub(r"\d+$", "", suffix)
                 x = f(mk.get("floor_strike"))
-                m = re.match(r"(.+?) wins by (?:over|more than)", mk.get("title") or "")
-                if m:
+                m = re.match(r"(.+?) wins (?:the 1st half |the first half )?by (?:over|more than)", mk.get("title") or "")
+                if m and kind == "spread":
                     g["teams"].setdefault(code, m.group(1).strip())
-                if x is not None:
-                    g["spread"].append((code, x, q))
-            elif kind == "total":
+                if x is not None and m:
+                    g[kind].append((code, x, q))
+            elif kind in ("total", "total1h"):
                 t = f(mk.get("floor_strike"))
                 if t is not None:
-                    g["total"].append((t, q))
+                    g[kind].append((t, q))
+            elif kind == "teamtotal":
+                code = re.sub(r"\d+$", "", suffix)
+                t = f(mk.get("floor_strike"))
+                if t is not None and re.match(r"(.+?) over [\d.]+", mk.get("title") or ""):
+                    g["teamtotal"].append((code, t, q))
             elif kind == "btts":
                 g["btts"] = q
     today = dt.datetime.now(ET).date()
@@ -417,6 +436,19 @@ def slug_num(x):
     whole = int(abs(x))
     frac = int(round((abs(x) - whole) * 10))
     return f"{whole}pt{frac}"
+
+
+def seg_slugs(base, half, kind, x):
+    """Polymarket US slugs for a full-game or first-half line: asc-{event}-[fh-]pos|neg-28pt5, tsc-{event}-[fh-]228pt5."""
+    pre = f"{half}-" if half else ""
+    if kind == "spread":
+        return [f"asc-{base}-{pre}pos-{slug_num(x)}", f"asc-{base}-{pre}neg-{slug_num(x)}"]
+    return [f"tsc-{base}-{pre}{slug_num(x)}"]
+
+
+def tt_slug(pg, pattern, team_idx, t):
+    abbr = (pg["teams"][team_idx].get("abbr") or "").lower()
+    return f"tsc-{pg['slug']}-" + pattern.format(abbr=abbr, t=slug_num(t))
 
 
 def pm_markets_by_slug(slugs, chunk=80):
@@ -595,14 +627,46 @@ def pm_quotes(slugs):
     return out
 
 
-def pm_top_qty(slug):
-    """(qty at best bid, qty at best ask) for the long side."""
+MIN_QTY = 1.0   # Polymarket US won't trade less than 1 contract; dust orders at the top of the book don't count
+
+
+def pm_book(slug):
+    """(bids, offers) as [(price, qty)] for the long side, or None."""
     try:
         d = get_json(f"{PM}/v1/markets/{slug}/book").get("marketData") or {}
-        bids, offers = d.get("bids") or [], d.get("offers") or []
-        return (f(bids[0].get("qty")) if bids else None, f(offers[0].get("qty")) if offers else None)
     except Exception:  # noqa: BLE001
-        return (None, None)
+        return None
+    lv = lambda rows: [(f((r.get("px") or {}).get("value")), f(r.get("qty"))) for r in rows or []]  # noqa: E731
+    return ([x for x in lv(d.get("bids")) if x[0] and x[1]], [x for x in lv(d.get("offers")) if x[0] and x[1]])
+
+
+def fill_price(book, side, qty=MIN_QTY):
+    """What it really costs to buy `qty` contracts of a side, walking past dust at the top of the book.
+    Returns (price, contracts available at that price or better); price is None if the book is too thin."""
+    bids, offers = book
+    if side == "long":
+        levels = sorted(offers)
+        cost = lambda px: px  # noqa: E731
+    else:  # buying the short side = selling the long side into the bids
+        levels = sorted(bids, reverse=True)
+        cost = lambda px: 1 - px  # noqa: E731
+    cum = 0.0
+    for px, q in levels:
+        cum += q
+        if cum >= qty - 1e-9:
+            deeper = sum(q2 for px2, q2 in levels if (px2 <= px + 1e-9 if side == "long" else px2 >= px - 1e-9))
+            return round(cost(px), 4), deeper
+    return None, cum
+
+
+def reprice(o, pp):
+    """Re-do a pair's math with a new Polymarket price."""
+    kp = o["k"]["price"]
+    pf = pm_fee(pp, o["p"]["fee_coef"])
+    cost = CONTRACTS * (kp + pp) + o["k"]["fee100"] + pf
+    o["p"].update({"price": round(pp, 4), "fee100": pf})
+    o.update({"cost100": round(cost, 2), "profit100": round(CONTRACTS - cost, 2), "per": round(cost / CONTRACTS, 4),
+              "roi": round((CONTRACTS - cost) / cost, 4)})
 
 
 # ---------------------------------------------------------------- pricing
@@ -913,49 +977,70 @@ def evaluate(pairs, quotes):
                     r["p"]["btn"] = "Yes" if pside == "long" else "No"
                     r["p"]["means"] = plab
                     found.append(r)
-        # spreads: Kalshi "A wins by over X" = A -X ; No = B +X
-        for code, x, kq in kg["spread"]:
-            if code not in assign:
+        # spreads: Kalshi "A wins by over X" = A -X ; No = B +X  (full game and first half)
+        for kkey, kind, sfx in (("spread", "Spread", ""), ("spread1h", "1st half spread", " (1st half)")):
+            for code, x, kq in kg.get(kkey) or []:
+                if code not in assign:
+                    continue
+                other = codes[1] if code == codes[0] else codes[0]
+                for info in pg.get(kkey) or []:
+                    h = info["h_long"]
+                    if abs(abs(h) - x) > 1e-6:
+                        continue
+                    pq = quotes.get(info["slug"], (None, None))
+                    long_side_team = pm_side_for_team(info, pg, assign[code])  # side that is `code`
+                    if not long_side_team:
+                        continue
+                    code_h = h if long_side_team == "long" else -h            # handicap Polymarket gives `code`
+                    other_side = "short" if long_side_team == "long" else "long"
+                    if abs(code_h + x) >= 1e-6:      # Polymarket must have code -X and other +X
+                        continue
+                    for kleg, klab, pside, plab in ((k_buy_yes(kq), f"{names[code]} -{x:g}{sfx}", other_side, f"{names[other]} +{x:g}{sfx}"),
+                                                    (k_buy_no(kq), f"{names[other]} +{x:g}{sfx}", long_side_team, f"{names[code]} -{x:g}{sfx}")):
+                        if not kleg:
+                            continue
+                        note(kind, kleg[0], pm_buy(pq, pside), info["fee"])
+                        r = combo(lg, kind, f"{x:g}", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
+                                  (pm_buy(pq, pside), pside, info, plab, pq), start)
+                        if r:
+                            found.append(r)
+        # totals (full game and first half)
+        for kkey, kind, sfx in (("total", "Total", ""), ("total1h", "1st half total", " (1st half)")):
+            for t, kq in kg.get(kkey) or []:
+                for info in pg.get(kkey) or []:
+                    if abs(info["line"] - t) > 1e-6:
+                        continue
+                    pq = quotes.get(info["slug"], (None, None))
+                    for kleg, klab, pside, plab in ((k_buy_yes(kq), f"Over {t:g}{sfx}", "short", f"Under {t:g}{sfx}"),
+                                                    (k_buy_no(kq), f"Under {t:g}{sfx}", "long", f"Over {t:g}{sfx}")):
+                        if not kleg:
+                            continue
+                        note(kind, kleg[0], pm_buy(pq, pside), info["fee"])
+                        r = combo(lg, kind, f"{t:g}", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
+                                  (pm_buy(pq, pside), pside, info, plab, pq), start)
+                        if r:
+                            found.append(r)
+        # team totals: Kalshi "Toronto over 97.5 points" = Polymarket "Will TOR score more than 97.5"
+        tt = LEAGUES[lg]["tt"]
+        for code, t, kq in kg.get("teamtotal") or []:
+            if not tt or code not in assign:
                 continue
-            other = codes[1] if code == codes[0] else codes[0]
-            for info in pg["spread"]:
-                h = info["h_long"]
-                if abs(abs(h) - x) > 1e-6:
+            slug_ = tt_slug(pg, tt, assign[code], t)
+            info = (pg.get("teamtotal") or {}).get(slug_)
+            if not info:
+                continue
+            pq = quotes.get(slug_) or info["quote"]
+            over, under = f"{names[code]} over {t:g}", f"{names[code]} under {t:g}"
+            for kleg, klab, pside, plab in ((k_buy_yes(kq), over, "short", under), (k_buy_no(kq), under, "long", over)):
+                if not kleg:
                     continue
-                pq = quotes.get(info["slug"], (None, None))
-                long_side_team = pm_side_for_team(info, pg, assign[code])  # side that is `code`
-                if not long_side_team:
-                    continue
-                code_h = h if long_side_team == "long" else -h            # handicap Polymarket gives `code`
-                other_side = "short" if long_side_team == "long" else "long"
-                if abs(code_h + x) < 1e-6:     # Polymarket has code -X and other +X
-                    pairs_ = [(k_buy_yes(kq), f"{names[code]} -{x:g}", other_side, f"{names[other]} +{x:g}"),
-                              (k_buy_no(kq), f"{names[other]} +{x:g}", long_side_team, f"{names[code]} -{x:g}")]
-                else:
-                    continue
-                for kleg, klab, pside, plab in pairs_:
-                    if not kleg:
-                        continue
-                    note("Spread", kleg[0], pm_buy(pq, pside), info["fee"])
-                    r = combo(lg, "Spread", f"{x:g}", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
-                              (pm_buy(pq, pside), pside, info, plab, pq), start)
-                    if r:
-                        found.append(r)
-        # totals
-        for t, kq in kg["total"]:
-            for info in pg["total"]:
-                if abs(info["line"] - t) > 1e-6:
-                    continue
-                pq = quotes.get(info["slug"], (None, None))
-                for kleg, klab, pside, plab in ((k_buy_yes(kq), f"Over {t:g}", "short", f"Under {t:g}"),
-                                                (k_buy_no(kq), f"Under {t:g}", "long", f"Over {t:g}")):
-                    if not kleg:
-                        continue
-                    note("Total", kleg[0], pm_buy(pq, pside), info["fee"])
-                    r = combo(lg, "Total", f"{t:g}", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
-                              (pm_buy(pq, pside), pside, info, plab, pq), start)
-                    if r:
-                        found.append(r)
+                note("Team total", kleg[0], pm_buy(pq, pside), info["fee"])
+                r = combo(lg, "Team total", f"{names[code]} {t:g}", kg, pg, (kleg[0], kleg[1], kleg[2], kq, klab),
+                          (pm_buy(pq, pside), pside, info, plab, pq), start)
+                if r:
+                    r["p"]["btn"] = info[pside]["desc"] or ("Over" if pside == "long" else "Under")
+                    r["p"]["means"] = plab
+                    found.append(r)
         # player props: Kalshi "X: N+" Yes + Polymarket "X at least N" No, and the reverse
         idx = pg.get("props")
         for kp in kg.get("props") or []:
@@ -1008,18 +1093,23 @@ def main():
         log(f"polymarket: fetched {len(full)} full events for props ({sum(len(v) for v in full.values())} markets)")
 
         want = []
-        for kg, pg, _ in pairs:
+        for kg, pg, assign in pairs:
             kg["props"] = kprops.get((kg["league"], kg["key"])) or []
-            base = pg["slug"]
+            base, cfg = pg["slug"], LEAGUES[kg["league"]]
             if pg["slug"] in full:
                 continue
             if pg["ml"]:
                 want.append(pg["ml"]["slug"])
             want += [i["slug"] for i in pg["ml3"].values()]
-            for x in sorted({x for _, x, q in kg["spread"] if live(q)}):
-                want += [f"asc-{base}-pos-{slug_num(x)}", f"asc-{base}-neg-{slug_num(x)}"]
-            for t in sorted({t for t, q in kg["total"] if live(q)}):
-                want.append(f"tsc-{base}-{slug_num(t)}")
+            for kind, half in (("spread", ""), ("spread1h", cfg["half"])):
+                for x in sorted({x for _, x, q in kg[kind] if live(q)}):
+                    want += seg_slugs(base, half, "spread", x)
+            for kind, half in (("total", ""), ("total1h", cfg["half"])):
+                for t in sorted({t for t, q in kg[kind] if live(q)}):
+                    want += seg_slugs(base, half, "total", t)
+            for code, t, q in kg["teamtotal"]:
+                if live(q) and cfg["tt"] and code in assign:
+                    want.append(tt_slug(pg, cfg["tt"], assign[code], t))
             if kg.get("btts"):
                 want.append(f"astatc-{base}-btts")
         markets = pm_markets_by_slug(want)
@@ -1029,7 +1119,7 @@ def main():
         result["p_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
         quotes = {}
         n_pm_props = 0
-        for kg, pg, _ in pairs:
+        for kg, pg, assign in pairs:
             base = pg["slug"]
             if base in full:
                 infos = [i for i in (pm_prop(m) for m in full[base]) if i]
@@ -1045,32 +1135,55 @@ def main():
             for info in pg["ml3"].values():
                 m = markets.get(info["slug"])
                 quotes[info["slug"]] = (quote_val(m.get("bestBidQuote")), quote_val(m.get("bestAskQuote"))) if m else info["quote"]
-            pg["spread"], pg["total"] = [], []
-            for slug_, m in ((x, markets.get(x)) for x in [f"asc-{base}-pos-{slug_num(v)}" for _, v, _ in kg["spread"]]
-                             + [f"asc-{base}-neg-{slug_num(v)}" for _, v, _ in kg["spread"]]):
-                if m and slug_ not in {i["slug"] for i in pg["spread"]}:
-                    info = pm_info(m)
+            cfg = LEAGUES[kg["league"]]
+            for kind, half in (("spread", ""), ("spread1h", cfg["half"])):
+                pg[kind] = []
+                for slug_ in dict.fromkeys(x for _, v, _ in kg[kind] for x in seg_slugs(base, half, "spread", v)):
+                    info = pm_info(markets[slug_]) if slug_ in markets else None
                     if info and info["type"] == "spreads":
-                        pg["spread"].append(info)
-            for t, _ in kg["total"]:
-                m = markets.get(f"tsc-{base}-{slug_num(t)}")
-                if m and m["slug"] not in {i["slug"] for i in pg["total"]}:
-                    info = pm_info(m)
+                        pg[kind].append(info)
+            for kind, half in (("total", ""), ("total1h", cfg["half"])):
+                pg[kind] = []
+                for slug_ in dict.fromkeys(x for v, _ in kg[kind] for x in seg_slugs(base, half, "total", v)):
+                    info = pm_info(markets[slug_]) if slug_ in markets else None
                     if info and info["type"] == "totals":
-                        pg["total"].append(info)
-            for info in ([pg["ml"]] if pg["ml"] else []) + pg["spread"] + pg["total"]:
+                        pg[kind].append(info)
+            pg["teamtotal"] = {}
+            for code, t, _ in kg["teamtotal"]:
+                slug_ = tt_slug(pg, cfg["tt"], assign[code], t) if cfg["tt"] and code in assign else None
+                if slug_ in markets:
+                    info = pm_info({**markets[slug_], "marketType": "teamtotal"})
+                    if info and (info["long"]["desc"] or "").strip().lower() in ("over", "yes"):
+                        pg["teamtotal"][slug_] = info
+            for info in ([pg["ml"]] if pg["ml"] else []) + pg["spread"] + pg["total"] + pg["spread1h"] + pg["total1h"] \
+                    + list(pg["teamtotal"].values()):
                 m = markets.get(info["slug"])
                 quotes[info["slug"]] = (quote_val(m.get("bestBidQuote")), quote_val(m.get("bestAskQuote"))) if m else info["quote"]
         opps = evaluate(pairs, quotes)
-        # sizes on the Polymarket side for anything worth showing
+        # Real prices on the Polymarket side: the best bid or ask is often a dust order (0.01 of a contract) that
+        # can't be traded, so walk each candidate's book to what 1 contract actually costs, and how many are there.
+        cand = opps[:400]
+        slugs_c = list(dict.fromkeys(o["p"]["slug"] for o in cand))
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            books = dict(zip(slugs_c, ex.map(pm_book, slugs_c)))
+        dust = 0
+        for o in cand:
+            book = books.get(o["p"]["slug"])
+            if not book:
+                o["p"]["size"] = None
+                continue
+            px, size = fill_price(book, o["p"]["side"])
+            if px is None:
+                o["drop"] = True             # less than 1 contract on the whole book: nothing to trade
+                continue
+            if px > o["p"]["price"] + 1e-9:
+                dust += 1
+                reprice(o, px)
+            o["p"]["size"] = size
+        thin = sum(1 for o in cand if o.get("drop"))
+        opps = sorted([o for o in cand if o["per"] <= WATCH_MAX and not o.get("drop")], key=lambda o: o["per"]) + opps[400:]
+        log(f"book check: {len(cand)} pairs, {dust} repriced past dust at the top of the book, {thin} dropped (under 1 contract)")
         top = opps[:200]
-        slugs_top = list(dict.fromkeys(o["p"]["slug"] for o in top))
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            qty = dict(zip(slugs_top, ex.map(pm_top_qty, slugs_top)))
-        for o in top:
-            bq, aq = qty.get(o["p"]["slug"], (None, None))
-            size = aq if o["p"]["side"] == "long" else bq
-            o["p"]["size"] = size if size and size > 0 else None
         counts = {}
         for lg in LEAGUES:
             c = {"kalshi": sum(1 for g in kgames if g["league"] == lg),
@@ -1093,8 +1206,11 @@ def main():
         k_to = sum(len(kg["total"]) for kg, _, _ in pairs)
         log(f"pairs priced: {json.dumps(STATS)}; matched games carry PM spreads={pm_sp} totals={pm_to}, "
             f"Kalshi spreads={k_sp} totals={k_to}")
-        ex_sp = [(kg["key"], [(c, x) for c, x, _ in kg["spread"]][:6], [(i["h_long"], i["long"]["desc"], i["long"]["team"]["abbr"]) for i in pg["spread"]][:4])
-                 for kg, pg, _ in pairs if pg["spread"] and kg["spread"]][:6]
+        ex_sp = [(kg["league"], kg["key"], kg["teams"], assign, [t.get("abbr") for t in pg["teams"]],
+                  [(c, x) for c, x, _ in kg["spread"]][:4],
+                  [(i["slug"].rsplit("-", 2)[-2:], i["h_long"], i["long"]["desc"], i["long"]["team"]["abbr"]) for i in pg["spread"]][:4])
+                 for kg, pg, assign in sorted(pairs, key=lambda p: LEAGUES[p[0]["league"]]["group"] != "soccer")
+                 if pg["spread"] and kg["spread"]][:6]
         ex_to = [(kg["key"], sorted(t for t, _ in kg["total"])[:8], [i["line"] for i in pg["total"]][:4])
                  for kg, pg, _ in pairs if pg["total"] and kg["total"]][:6]
         log(f"spread examples: {ex_sp}")
