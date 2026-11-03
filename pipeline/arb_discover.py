@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import re
+import time
 import traceback
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -25,42 +26,40 @@ def log(m):
     LOG.append(str(m))
 
 
+def flush():
+    save("_log.json", LOG)
+
+
 def save(name, obj):
     with open(os.path.join(OUT, name), "w") as fh:
         json.dump(obj, fh, indent=1, default=str)
 
 
 def kalshi_sports():
-    series, cursor = [], None
-    for _ in range(30):
-        p = {"category": "Sports", "limit": 1000}
+    """One pass over all open Kalshi events (cursor pages), keeping sports ones, grouped by series."""
+    by, cursor, pages, total = defaultdict(list), None, 0, 0
+    t0 = time.time()
+    while pages < 150 and time.time() - t0 < 150:
+        p = {"status": "open", "limit": 200}
         if cursor:
             p["cursor"] = cursor
-        d = get_json(f"{KB}/series", params=p)
-        series += d.get("series") or []
+        d = get_json(f"{KB}/events", params=p)
+        evs = d.get("events") or []
+        pages += 1
+        total += len(evs)
+        for e in evs:
+            if (e.get("category") or "").lower() == "sports":
+                by[e.get("series_ticker")].append(e)
         cursor = d.get("cursor")
-        if not cursor:
+        if not cursor or not evs:
             break
-    log(f"kalshi sports series: {len(series)}")
-
-    def events(s):
-        t = s.get("ticker")
-        try:
-            d = get_json(f"{KB}/events", params={"series_ticker": t, "status": "open", "limit": 200})
-            evs = d.get("events") or []
-            return t, s.get("title"), len(evs), [(e.get("event_ticker"), e.get("title"), e.get("sub_title")) for e in evs[:3]], \
-                (s.get("tags") or []), (evs[0].get("product_metadata") if evs else None)
-        except Exception as e:  # noqa: BLE001
-            return t, s.get("title"), -1, [repr(e)[:120]], [], None
-
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        rows = list(ex.map(events, series))
-    rows = [r for r in rows if r[2] != 0]
-    rows.sort(key=lambda r: -r[2])
+    log(f"kalshi open events scanned: {total} in {pages} pages, sports series: {len(by)}")
+    rows = sorted(((s, len(es), [(e.get("event_ticker"), e.get("title"), e.get("sub_title")) for e in es[:3]],
+                    (es[0].get("product_metadata") or {}).get("competition")) for s, es in by.items()), key=lambda r: -r[1])
     save("kalshi_sports_series.json", rows)
-    log(f"kalshi sports series with open events: {len(rows)}")
     for r in rows[:400]:
-        log(f"  K {r[0]:<28} n={r[2]:<4} {r[1]!s:<60.60} | {r[3][0] if r[3] else ''} | {r[5]}")
+        log(f"  K {r[0]!s:<30} n={r[1]:<4} {r[3]!s:<28.28} | {r[2][0] if r[2] else ''}")
+    flush()
     return rows
 
 
@@ -90,6 +89,7 @@ def pm_sports(now):
                         "mcount": [((x.get("marketCounts") or {}).get("numMarkets")) for x in es[:5]]})
     save("pm_sports_prefixes.json", summary)
     log(f"pm sports events next 7 days: {len(evs)} in {len(by)} prefixes")
+    flush()
     for s in summary:
         log(f"  P {s['prefix']:<12} n={s['n']:<4} tag={s['tag']!s:<22} {s['titles'][:2]} types={s['nested_types']} mcount={s['mcount'][:3]}")
     return by
