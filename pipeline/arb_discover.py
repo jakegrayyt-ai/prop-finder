@@ -1,21 +1,23 @@
-"""One-off probe (round 6): can a browser read Kalshi directly, and how heavy is a Polymarket US live check?
+"""One-off probe (round 7): every sport both Kalshi and Polymarket US list, and their market types.
 
 Writes JSON files to ./debug for reading back from the debug branch.
 """
 import datetime as dt
 import json
 import os
+import re
 import traceback
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
-import requests
-
-from .net import UA, get_json
+from . import kalshi as K
+from .net import get_json
 
 PM = "https://gateway.polymarket.us"
+KB = K.BASES[0]
 OUT = "debug"
 os.makedirs(OUT, exist_ok=True)
 LOG = []
-ORIGIN = "https://jakegrayyt-ai.github.io"
 
 
 def log(m):
@@ -23,58 +25,136 @@ def log(m):
     LOG.append(str(m))
 
 
-def probe(name, url, params=None, origin=ORIGIN, method="GET", extra=None):
-    h = {"User-Agent": UA, "Accept": "application/json"}
-    if origin:
-        h["Origin"] = origin
-    if extra:
-        h.update(extra)
-    try:
-        r = requests.request(method, url, params=params, headers=h, timeout=30)
-        cors = {k: v for k, v in r.headers.items() if k.lower().startswith("access-control") or k.lower() in ("vary", "cache-control", "server", "cf-cache-status")}
-        log(f"{name}: {r.status_code} bytes={len(r.content)} {cors} :: {r.text[:160]!r}")
-        return r
-    except Exception as e:  # noqa: BLE001
-        log(f"{name}: error {e!r}"[:300])
-        return None
+def save(name, obj):
+    with open(os.path.join(OUT, name), "w") as fh:
+        json.dump(obj, fh, indent=1, default=str)
+
+
+def kalshi_sports():
+    series, cursor = [], None
+    for _ in range(30):
+        p = {"category": "Sports", "limit": 1000}
+        if cursor:
+            p["cursor"] = cursor
+        d = get_json(f"{KB}/series", params=p)
+        series += d.get("series") or []
+        cursor = d.get("cursor")
+        if not cursor:
+            break
+    log(f"kalshi sports series: {len(series)}")
+
+    def events(s):
+        t = s.get("ticker")
+        try:
+            d = get_json(f"{KB}/events", params={"series_ticker": t, "status": "open", "limit": 200})
+            evs = d.get("events") or []
+            return t, s.get("title"), len(evs), [(e.get("event_ticker"), e.get("title"), e.get("sub_title")) for e in evs[:3]], \
+                (s.get("tags") or []), (evs[0].get("product_metadata") if evs else None)
+        except Exception as e:  # noqa: BLE001
+            return t, s.get("title"), -1, [repr(e)[:120]], [], None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        rows = list(ex.map(events, series))
+    rows = [r for r in rows if r[2] != 0]
+    rows.sort(key=lambda r: -r[2])
+    save("kalshi_sports_series.json", rows)
+    log(f"kalshi sports series with open events: {len(rows)}")
+    for r in rows[:400]:
+        log(f"  K {r[0]:<28} n={r[2]:<4} {r[1]!s:<60.60} | {r[3][0] if r[3] else ''} | {r[5]}")
+    return rows
+
+
+def pm_sports(now):
+    lo = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    hi = (now + dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    evs, off = [], 0
+    while off < 20000:
+        d = get_json(f"{PM}/v1/events", params={"closed": "false", "limit": 100, "offset": off,
+                                                "startDateMin": lo, "startDateMax": hi})
+        page = d.get("events") or []
+        evs += [e for e in page if e.get("category") == "sports"]
+        if len(page) < 100:
+            break
+        off += 100
+    by = defaultdict(list)
+    for e in evs:
+        by[(e.get("slug") or "").split("-")[0]].append(e)
+    summary = []
+    for pre, es in sorted(by.items(), key=lambda kv: -len(kv[1])):
+        e = es[0]
+        mt = Counter(m.get("sportsMarketType") or m.get("marketType") for x in es for m in x.get("markets") or [])
+        sides = [[(s.get("long"), s.get("description")) for s in m.get("marketSides") or []] for m in (e.get("markets") or [])[:3]]
+        summary.append({"prefix": pre, "n": len(es), "tag": (e.get("primaryTag") or {}).get("label"),
+                        "series": e.get("seriesSlug"), "titles": [x.get("title") for x in es[:4]],
+                        "slugs": [x.get("slug") for x in es[:3]], "nested_types": dict(mt), "sides": sides,
+                        "mcount": [((x.get("marketCounts") or {}).get("numMarkets")) for x in es[:5]]})
+    save("pm_sports_prefixes.json", summary)
+    log(f"pm sports events next 7 days: {len(evs)} in {len(by)} prefixes")
+    for s in summary:
+        log(f"  P {s['prefix']:<12} n={s['n']:<4} tag={s['tag']!s:<22} {s['titles'][:2]} types={s['nested_types']} mcount={s['mcount'][:3]}")
+    return by
+
+
+def pm_full_types(by):
+    """One full event per interesting prefix: which market types exist, with a sample of each."""
+    out = {}
+    want = [p for p in by if p not in ("nba", "nfl", "cbb", "cfb")][:40] + ["nhl", "nba"]
+    for pre in dict.fromkeys(want):
+        es = by.get(pre) or []
+        if not es:
+            continue
+        e = max(es[:15], key=lambda x: (x.get("marketCounts") or {}).get("numMarkets") or 0)
+        try:
+            d = get_json(f"{PM}/v1/events/slug/{e['slug']}")
+            ev = d.get("event", d)
+            ms = ev.get("markets") or []
+            types = Counter(m.get("sportsMarketType") for m in ms)
+            samples = {}
+            for m in ms:
+                t = m.get("sportsMarketType")
+                if t not in samples:
+                    samples[t] = {"slug": m.get("slug"), "q": m.get("question"), "title": m.get("title"), "line": m.get("line"),
+                                  "sides": [(s.get("long"), s.get("description"), (s.get("team") or {}).get("name")) for s in m.get("marketSides") or []],
+                                  "desc": (m.get("description") or "")[:500]}
+            out[pre] = {"event": e["slug"], "title": ev.get("title"), "n": len(ms), "types": dict(types), "samples": samples}
+            log(f"  FULL {pre}: {e['slug']} {len(ms)} markets: {dict(types)}")
+        except Exception as ex:  # noqa: BLE001
+            log(f"  FULL {pre} failed {ex!r}"[:200])
+    save("pm_full_types.json", out)
+
+
+def pm_market_filters(by):
+    e = (by.get("nba") or by.get("nhl") or [None])[0]
+    if not e:
+        return
+    for params in ({"eventSlug": e["slug"], "limit": 500}, {"event_slug": e["slug"], "limit": 500},
+                   {"eventId": e.get("id"), "limit": 500}, {"eventSlug": e["slug"], "marketType": "props", "limit": 500}):
+        try:
+            d = get_json(f"{PM}/v1/markets", params=params)
+            ms = d.get("markets") or []
+            log(f"  markets filter {params}: n={len(ms)} first={[m.get('slug') for m in ms[:3]]}")
+        except Exception as ex:  # noqa: BLE001
+            log(f"  markets filter {params}: {ex!r}"[:200])
+
+
+def rules():
+    for s in ("KXNBAPTS", "KXNHLGOAL", "KXNFLREC"):
+        try:
+            d = get_json(f"{KB}/markets", params={"series_ticker": s, "status": "open", "limit": 1})
+            m = (d.get("markets") or [{}])[0]
+            log(f"  K RULES {s}: {m.get('rules_primary')!s:.400} || {m.get('rules_secondary')!s:.700}")
+        except Exception as ex:  # noqa: BLE001
+            log(f"  K RULES {s} failed {ex!r}")
 
 
 def main():
     now = dt.datetime.now(dt.timezone.utc)
     log(f"now {now.isoformat()}")
-    tk = "KXNBAGAME-26NOV05MIAGSW-MIA"
-    ev = "KXNBAGAME-26NOV05MIAGSW"
-    for base in ("https://api.elections.kalshi.com", "https://external-api.kalshi.com", "https://trading-api.kalshi.com",
-                 "https://api.kalshi.com"):
-        probe(f"{base} markets?tickers no-origin", f"{base}/trade-api/v2/markets", {"tickers": tk}, origin=None)
-        probe(f"{base} markets?tickers origin", f"{base}/trade-api/v2/markets", {"tickers": tk})
-        probe(f"{base} markets/{{t}} origin", f"{base}/trade-api/v2/markets/{tk}")
-        probe(f"{base} OPTIONS markets", f"{base}/trade-api/v2/markets", {"tickers": tk}, method="OPTIONS",
-              extra={"Access-Control-Request-Method": "GET"})
-    probe("v1 events origin", f"https://api.elections.kalshi.com/v1/events/{ev}")
-    probe("v1 series origin", "https://api.elections.kalshi.com/v1/series/KXNBAGAME")
-    probe("kalshi.com origin as kalshi", "https://api.elections.kalshi.com/trade-api/v2/markets", {"tickers": tk},
-          origin="https://kalshi.com")
-    probe("origin null", "https://api.elections.kalshi.com/trade-api/v2/markets", {"tickers": tk}, origin="null")
-
-    # Polymarket US: how heavy is a tennis match event, and a narrow live listing?
-    probe("pm tennis event", f"{PM}/v1/events/slug/atp-colwon-tsuhua-2026-11-01")
-    lo = (now - dt.timedelta(hours=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hi = (now + dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = probe("pm live narrow", f"{PM}/v1/events", {"live": "true", "closed": "false", "limit": 100,
-                                                   "startDateMin": lo, "startDateMax": hi})
-    if r is not None and r.ok:
-        evs = r.json().get("events") or []
-        log(f"  live narrow: n={len(evs)} prefixes={sorted({(e.get('slug') or '').split('-')[0] for e in evs})}")
-        sizes = sorted(((len(json.dumps(e)), e.get("slug"), len(e.get("markets") or [])) for e in evs), reverse=True)[:5]
-        log(f"  biggest: {sizes}")
-    for extra in ({"seriesSlug": "atp-2025"}, {"tagSlug": "tennis"}, {"category": "sports", "live": "true"},
-                  {"fields": "slug,live,period"}, {"includeMarkets": "false"}):
-        p = {"closed": "false", "limit": 20, "startDateMin": lo, "startDateMax": hi} | extra
-        r = probe(f"pm events {extra}", f"{PM}/v1/events", p)
-        if r is not None and r.ok:
-            evs = r.json().get("events") or []
-            log(f"   -> n={len(evs)} first={[e.get('slug') for e in evs[:4]]} mk/ev={[len(e.get('markets') or []) for e in evs[:4]]}")
+    kalshi_sports()
+    by = pm_sports(now)
+    pm_market_filters(by)
+    pm_full_types(by)
+    rules()
 
 
 if __name__ == "__main__":
@@ -82,5 +162,4 @@ if __name__ == "__main__":
         main()
     except Exception:  # noqa: BLE001
         log(traceback.format_exc())
-    with open(os.path.join(OUT, "_log.json"), "w") as fh:
-        json.dump(LOG, fh, indent=1)
+    save("_log.json", LOG)
