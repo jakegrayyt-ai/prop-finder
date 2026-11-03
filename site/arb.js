@@ -164,10 +164,11 @@
   function pmNow(o) {
     if (!o.p.checked) return `Price from the scan, ${ago(D.pAt)}.`;
     if (o.p.gone) return 'Polymarket has no price on this side right now.';
-    if (o.p.move == null || Math.abs(o.p.move) < 0.005) return `Re-checked ${ago(o.p.checked)}: still ${cents(o.p.now)}.`;
+    const when = `Re-checked ${ago(o.p.checked)}`;
+    if (o.p.move == null || Math.abs(o.p.move) < 0.005) return `${when}: no change.`;
     const dir = o.p.move > 0 ? 'up' : 'down';
-    const used = o.p.move < 0 ? ` The math keeps the scan price because Kalshi has probably moved too.` : '';
-    return `Re-checked ${ago(o.p.checked)}: ${dir} to ${cents(o.p.now)} from ${cents(o.p.scan)} at the scan.${used}`;
+    const used = o.p.move < 0 ? ' The math keeps the scan price because Kalshi has probably moved too.' : '';
+    return `${when}: Polymarket moved ${dir} ${cents(Math.abs(o.p.move))} since the scan.${used}`;
   }
 
   function card(o) {
@@ -281,10 +282,8 @@
       o.p.sizeAt = Date.now();
       if (fill == null) { o.p.size = cum; return; }                 // under 1 contract on the whole book
       o.p.size = levels.filter(([p]) => cost(p) <= fill + 1e-9).reduce((a, [, q]) => a + q, 0);
-      if (fill > o.p.price + 1e-9) {
-        o.p.now = Math.round(fill * 10000) / 10000;
-        o.p.move = o.p.now - o.p.scan;
-        o.p.price = Math.max(o.p.scan, o.p.now);
+      if (fill > o.p.price + 1e-9) {     // 1 full contract costs more now than the scan said
+        o.p.price = Math.round(fill * 10000) / 10000;
         recompute(o);
       }
     } catch (e) { /* keep the scan's size */ }
@@ -311,8 +310,8 @@
       const px = !q ? NaN : o.p.side === 'long' ? q.ask : (Number.isFinite(q.bid) ? 1 - q.bid : NaN);
       if (okPrice(px)) {
         o.p.now = Math.round(px * 10000) / 10000;
-        o.p.move = o.p.now - o.p.scan;
-        o.p.price = Math.max(o.p.scan, o.p.now);
+        o.p.move = o.p.scanTop != null ? o.p.now - o.p.scanTop : null;
+        o.p.price = Math.max(o.p.scan, o.p.now);   // never better than the scan
         o.p.gone = false;
       } else {
         o.p.now = null;
@@ -344,7 +343,10 @@
     D.kAt = Date.parse(D.k_at || D.updated);
     D.pAt = Date.parse(D.p_at || D.updated);
     for (const o of D.opps) {
-      o.p.scan = o.p.price;
+      o.p.scan = o.p.price;   // what 1 full contract cost at the scan
+      // the scan's best bid or ask (can be a dust order), to compare with the live best bid or ask
+      const top = o.p.side === 'long' ? o.p.ask : (o.p.bid != null ? 1 - o.p.bid : null);
+      o.p.scanTop = Number.isFinite(top) ? top : null;
       o.p.move = null;
     }
     $('#kind').value = S.kind;
