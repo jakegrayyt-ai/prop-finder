@@ -11,8 +11,9 @@ import traceback
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import cache, espn, injury, kalshi, matchups, model, stats
+from . import cache, espn, injury, kalshi, matchups, model, stats, teams
 from .espn import ET, norm_name
+from .kalshi import TEAM_ALIASES, team_match
 
 OUT = os.environ.get("PROP_OUT", "site/data")
 WORKERS = 8
@@ -21,12 +22,11 @@ DEFAULT_TOTAL = {"nba": 228.0, "nfl": 44.5, "nhl": 6.1}
 BINARY = {"dd", "td3"}
 IGNORE_STATUS = {"Active"}
 OUT_STATUS = {"Out", "Injured Reserve", "Suspension"}
-TEAM_ALIASES = {
-    "nba": {"WAS": "WSH", "NYK": "NY", "NOP": "NO", "GSW": "GS", "SAS": "SA", "UTA": "UTAH", "PHO": "PHX", "BRK": "BKN"},
-    "nfl": {"JAC": "JAX", "WAS": "WSH", "LA": "LAR", "LV": "LV"},
-    "nhl": {"SJS": "SJ", "TBL": "TB", "NJD": "NJ", "LAK": "LA", "UTA": "UTAH", "WAS": "WSH", "MON": "MTL"},
-}
+INJ_KEYS = ("status", "note", "date", "type", "ret")
 SHORT_LEAGUE = {"nba": "NBA", "nfl": "NFL", "nhl": "NHL"}
+# season averages from box scores, for the team injury report
+USAGE_KEYS = {"nba": ("min", "pts"), "nhl": ("toi", "points"),
+              "nfl": ("pass_att", "pass_yds", "rush_att", "targets", "rec_yds")}
 
 _log = []
 
@@ -61,20 +61,13 @@ def r2(x, n=3):
     return None if x is None else round(x, n)
 
 
-def team_match(league, kcode, abbr):
-    if not kcode or not abbr:
-        return False
-    k = TEAM_ALIASES.get(league, {}).get(kcode, kcode)
-    return k == abbr or kcode == abbr
-
-
 # ---------------------------------------------------------------- per league
-def load_league(league, props, today):
-    """Everything ESPN-side for one league. Returns dict used by assemble()."""
+def load_league(league, props, today, tmk=()):
+    """Everything ESPN-side for one league. tmk: Kalshi team markets (their games need schedules too)."""
     cur_season, prev_season = espn.season_years(league, today)
-    teams = espn.teams(league)
-    team_by_id = {t["id"]: t for t in teams}
-    rosters = pmap(lambda t: safe(espn.roster, league, t, default=[], label="roster"), teams)
+    team_list = espn.teams(league)       # (not `teams`: that's the team-bets module)
+    team_by_id = {t["id"]: t for t in team_list}
+    rosters = pmap(lambda t: safe(espn.roster, league, t, default=[], label="roster"), team_list)
     athletes = [a for r in rosters for a in r]
     by_name, by_initial = defaultdict(list), defaultdict(list)
     for a in athletes:
@@ -86,7 +79,7 @@ def load_league(league, props, today):
     pos_of = {a["id"]: a["pos"] for a in athletes}
 
     # schedule for the prop dates (+ the day before, for rest / back-to-backs)
-    dates = sorted({dt.date.fromisoformat(p["date"]) for p in props if p.get("date")})
+    dates = sorted({dt.date.fromisoformat(p["date"]) for p in list(props) + list(tmk) if p.get("date")})
     sched_dates = sorted(set(dates) | {d - dt.timedelta(days=1) for d in dates} | {today, today - dt.timedelta(days=1)})
     sched = []
     for d in sched_dates:
@@ -153,7 +146,7 @@ def load_league(league, props, today):
 
     logs = dict(pmap(logs_for, aids))
     # All-Star games and exhibitions against teams outside the league aren't real games for a prop
-    abbrs = {t.get("abbr") for t in teams if t.get("abbr")}
+    abbrs = {t.get("abbr") for t in team_list if t.get("abbr")}
     alias = TEAM_ALIASES.get(league, {})
 
     def in_league(opp):
@@ -173,7 +166,13 @@ def load_league(league, props, today):
     median_cur = cur_counts[len(cur_counts) // 2] if cur_counts else 0
 
     # opponent defense vs position from this season's finished games
-    table, team_games = safe(build_matchups, league, cur_season, today, pos_of, default=(None, {}), label="matchups")
+    table, team_games, done, usage = safe(build_matchups, league, cur_season, today, pos_of,
+                                          default=(None, {}, [], {}), label="matchups")
+    done = list(done) + [g for g in games.values() if g["completed"] and g.get("season_type") in (2, 3)]
+    prev_games = []
+    if tmk:   # team bets also look at last season's results
+        for sched_ in pmap(lambda t: safe(espn.team_schedule, league, t["id"], prev_season, default=[], label="team-sched"), team_list):
+            prev_games.extend(sched_ or [])
     inj = safe(espn.injuries, league, default={}, label="injuries") or {}
     roster_by_id = {a["id"]: a for a in athletes}
 
@@ -188,7 +187,8 @@ def load_league(league, props, today):
     log(f"{league}: {hurt} games marked as left early hurt")
     return {"league": league, "matched": matched, "unmatched": dict(unmatched), "logs": logs, "games": games,
             "table": table, "inj": inj, "athletes": roster_by_id, "teams": team_by_id, "lg_total": lg_total,
-            "median_cur": median_cur, "team_games": team_games}
+            "median_cur": median_cur, "team_games": team_games, "done": done, "prev_games": prev_games,
+            "usage": usage}
 
 
 def build_matchups(league, season, today, pos_of):
@@ -217,7 +217,21 @@ def build_matchups(league, season, today, pos_of):
             if tid and g.get("date"):
                 who = {ln["aid"] for ln in lines if ln.get("team_id") == tid}
                 team_games[tid][g["date"]] = who or None
-    return matchups.build(league, boxes, pos_of), {t: sorted(v.items()) for t, v in team_games.items()}
+    # everyone's season averages, for the team injury report (who's missing and how much he plays)
+    sums = defaultdict(lambda: defaultdict(float))
+    for lines in boxes.values():
+        for ln in lines or []:
+            s, u = ln.get("s") or {}, sums[ln["aid"]]
+            u["gp"] += 1
+            if "saves" in s:
+                u["gs"] += 1
+            for k in USAGE_KEYS[league]:
+                if s.get(k) is not None:
+                    u[k] += s[k]
+    usage = {aid: {k: (v if k in ("gp", "gs") else round(v / u["gp"], 2)) for k, v in u.items()} for aid, u in sums.items()}
+    for u in usage.values():
+        u["gp"], u["gs"] = int(u.get("gp", 0)), int(u.get("gs", 0))
+    return (matchups.build(league, boxes, pos_of), {t: sorted(v.items()) for t, v in team_games.items()}, done, usage)
 
 
 # ---------------------------------------------------------------- per prop
@@ -372,18 +386,23 @@ def main():
 
     raw, base, counts = kalshi.load_props(log)
     log(f"kalshi {base}: {len(raw)} prop markets " + json.dumps(counts))
+    traw, tcounts = kalshi.load_team(base, log)
+    log(f"kalshi: {len(traw)} team markets " + json.dumps(tcounts))
+    counts.update(tcounts)
     lo, hi = (today - dt.timedelta(days=1)).isoformat(), (today + dt.timedelta(days=8)).isoformat()
     raw = [p for p in raw if p.get("date") and lo <= p["date"] <= hi]
+    traw = [t for t in traw if lo <= t["date"] <= hi]
 
     rows, details, players, games_out, unmatched = [], defaultdict(dict), {}, {}, {}
     league_meta = {}
     for league in ("nba", "nfl", "nhl"):
         props = [p for p in raw if p["league"] == league]
-        if not props:
+        tmk = [t for t in traw if t["league"] == league]
+        if not props and not tmk:
             league_meta[league] = {"props": 0, "games": 0}
             continue
         try:
-            L = load_league(league, props, today)
+            L = load_league(league, props, today, tmk)
         except Exception:  # noqa: BLE001
             log(f"league {league} failed:\n{traceback.format_exc()}")
             continue
@@ -411,6 +430,8 @@ def main():
                 inj = L["inj"].get(p["aid"])
                 if inj and inj.get("status") in IGNORE_STATUS:
                     inj = None
+                if inj:
+                    inj = {k: inj.get(k) for k in INJ_KEYS}
                 team = L["teams"].get(p["team_id"], {})
                 players[row["pid"]] = {"name": a.get("name") or p["player_name"], "team": team.get("abbr"),
                                        "pos": a.get("pos"), "lg": league, "inj": inj}
@@ -420,9 +441,35 @@ def main():
                                "games": [{k: x.get(k) for k in ("eid", "date", "opp", "home", "res", "score", "post",
                                                                 "season", "s", "inj") if x.get(k) is not None or k != "inj"}
                                          for x in gl]}, f, separators=(",", ":"))
-        league_meta[league] = {"props": kept, "games": len({r["gid"] for r in rows if r["lg"] == league}),
-                               "unmatched": sum(L["unmatched"].values())}
         log(f"{league}: {kept} props kept, {sum(L['unmatched'].values())} unmatched markets")
+
+        # team bets: moneylines, spreads, game totals, team totals
+        n_team = 0
+        if tmk:
+            try:
+                T = teams.build(league, tmk, L, today, log)
+            except Exception:  # noqa: BLE001
+                log(f"team bets {league} failed:\n{traceback.format_exc()}"[:1500])
+                T = None
+            if T:
+                rows.extend(T["rows"])
+                n_team = len(T["rows"])
+                for gid, g in T["games"].items():
+                    if gid not in games_out:
+                        games_out[gid] = {k: g.get(k) for k in ("start", "date", "state", "detail", "home", "away",
+                                                                 "home_name", "away_name", "total", "line", "week")}
+                        games_out[gid]["lg"] = league
+                players.update(T["players"])
+                for pid, blob in T["files"].items():
+                    blob["props"] = T["details"].get(pid, {})
+                    with open(os.path.join(OUT, "p", f"{pid}.json"), "w") as f:
+                        json.dump(blob, f, separators=(",", ":"))
+                if T["unmatched"]:
+                    unmatched[league + "-team"] = dict(T["unmatched"])
+                    log(f"{league}: {sum(T['unmatched'].values())} team markets unmatched")
+        league_meta[league] = {"props": kept, "teams": n_team,
+                               "games": len({r["gid"] for r in rows if r["lg"] == league}),
+                               "unmatched": sum(L["unmatched"].values())}
 
     # per-player model details next to the game logs
     for pid, det in details.items():
@@ -446,7 +493,7 @@ def main():
         json.dump(board, f, separators=(",", ":"))
     with open(os.path.join(OUT, "debug.json"), "w") as f:
         json.dump({"log": _log[-400:], "unmatched": unmatched, "series": counts}, f, indent=1)
-    log(f"done: {len(rows)} props, {len(players)} players in {time.time() - t0:.0f}s")
+    log(f"done: {len(rows)} rows (props and team bets), {len(players)} players and teams in {time.time() - t0:.0f}s")
 
 
 if __name__ == "__main__":

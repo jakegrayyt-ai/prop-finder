@@ -1,6 +1,6 @@
 # Prop Finder
 
-A research board for **Kalshi player props** in the NBA, NFL and NHL. For every open prop it shows the Kalshi price next to the player's history: hit rates over the last 5, 10 and 20 games, this season, last season, against tonight's opponent and at home or away, plus the current streak, a matchup rating and a stats-based estimate of the edge after Kalshi's fee.
+A research board for **Kalshi player props and team bets** in the NBA, NFL and NHL. For every open market it shows the Kalshi price next to the history: hit rates over the last 5, 10 and 20 games, this season, last season, against tonight's opponent and at home or away, plus the current streak, a matchup rating and a stats-based estimate of the edge after Kalshi's fee.
 
 **Live site:** https://jakegrayyt-ai.github.io/prop-finder/
 
@@ -9,6 +9,7 @@ A research board for **Kalshi player props** in the NBA, NFL and NHL. For every 
 A GitHub Actions job (`.github/workflows/update.yml`) is scheduled every 10 minutes. GitHub runs scheduled jobs when it has room, so in practice updates land every 10 to 60 minutes:
 
 1. **Kalshi** (public market data, no account or API key). It reads every open market in the standard player-prop series: NBA points, rebounds, assists, threes, PRA, steals, blocks, steals + blocks, double-doubles and triple-doubles. NFL passing, rushing and receiving yards, receptions, touchdowns, passing TDs, completions, attempts, interceptions and longest plays. NHL goals, points, assists and goalie saves.
+   Team bets too: moneylines, spreads ("Boston wins by over 8.5"), game totals and team totals.
 2. **ESPN** (public JSON, also one of Kalshi's settlement sources). It pulls rosters, schedules with betting totals, injury reports, each player's game log for this season and last season, and every finished box score this season. The box scores feed the opponent-defense numbers.
 3. **The model** (`pipeline/model.py`) estimates tonight's average for the stat. It weights recent games more and pulls toward last season while the sample is small. Then it nudges for matchup, home or away, the betting total and back-to-backs, and turns that into a chance of reaching the line.
 4. **The edge** compares that to Kalshi's price after the fee (0.07 × price × (1 − price) per contract). Kalshi's price is treated as a strong prior, so the model only moves it part of the way. When a liquid market and the model disagree by more than 15 points, the prop is flagged **Check news**, and the edge stays close to the market. A gap that size usually means an injury or lineup change the box scores don't show yet.
@@ -56,6 +57,17 @@ Real arbitrage is rare. The two sites usually agree within a few cents, and the 
 
 Hit rates are colored **against the price**, not against 50%. A 60% hit rate on a line priced at 75¢ shows red, because the player clears it less often than the market expects.
 
+## Team bets
+
+Kalshi's moneylines, spreads, game totals and team totals sit on the same board (pick **Team bets** under *Bets* to see only them). They work like props:
+
+- **The line.** `−8.5` is Kalshi's "wins by over 8.5", so yes needs a win by 9 or more and no is the other side +8.5. `O 112.5` is a team or game total of 113 or more. `Win` is the moneyline.
+- **Hit rates** come from the team's final scores this season and last season. A game total uses both teams' games, a meeting between them counted once, and its *Venue* split is the home team at home plus the away team on the road. Margin bars hang below zero for losses.
+- **The model** (`pipeline/teams.py`) rates every team's scoring and defense, adjusted for the teams it played. Recent games count more, and early in the season it leans on last season. It projects both teams' scores tonight with a home edge, then turns them into a chance for each line: a bell curve around the projected margin, team score or total in the NBA and NFL, and Poisson goals in the NHL (a tie after regulation goes to overtime or a shootout, which adds a goal for the winner, as in the final score).
+- **The edge** leans on Kalshi's price even harder than for props, because team markets are Kalshi's busiest. It leans harder still on long shots, where a simple score model is least reliable.
+- **Injury report.** The drawer lists both teams' injuries from ESPN with each player's minutes and production this season from the box scores, and flags **Key player out** when a regular is out. A team's past results include games he played, so its trends can look better than tonight's lineup.
+- Kalshi settles team bets on the final score, overtime included.
+
 ## Injuries
 
 - **Games he left hurt.** If a player played far less than usual (under half his normal minutes in the NBA or ice time in the NHL; under 40% of his normal pass attempts, or carries plus targets, in the NFL) and then missed his team's next game or went on the injury report within a few days, that game is marked *left early hurt*. It's drawn grey, and it's left out of hit rates and the model. Whether he missed a game comes from both the box score and his game log. Short games without that evidence (foul trouble, ejections, blowouts) are noted but still count.
@@ -81,8 +93,9 @@ Hit rates are colored **against the price**, not against 50%. A 60% hit rate on 
 ## Files
 
 ```
-pipeline/kalshi.py     Kalshi prop markets -> player, stat, line, prices
-pipeline/espn.py       ESPN rosters, schedules, injuries, game logs, box scores
+pipeline/kalshi.py     Kalshi prop and team markets -> player or team, stat, line, prices
+pipeline/espn.py       ESPN rosters, schedules, team schedules, injuries, game logs, box scores
+pipeline/teams.py      team bets: results history, team ratings, projected scores, injury report
 pipeline/matchups.py   opponent defense vs position from this season's box scores
 pipeline/stats.py      hit rates, splits, streaks
 pipeline/model.py      projection, probability, Kalshi fee and edge

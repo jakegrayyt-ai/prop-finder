@@ -42,6 +42,32 @@ SERIES = {
     "KXNHLSAVE": ("nhl", "saves", "Saves"),
 }
 
+# Team markets: series -> (league, kind).
+#   win    "Boston wins"                        ticker ...-BOS
+#   margin "Boston wins by over 8.5 points"     ticker ...-BOS9   (Kalshi's spread: yes = cover -8.5)
+#   total  "Over 225.5 points scored" (game)    ticker ...-226
+#   tpts   "Boston over 112.5 points scored"    ticker ...-BOS113 (team total)
+TEAM_SERIES = {
+    "KXNBAGAME": ("nba", "win"), "KXNBASPREAD": ("nba", "margin"), "KXNBATOTAL": ("nba", "total"), "KXNBATEAMTOTAL": ("nba", "tpts"),
+    "KXNFLGAME": ("nfl", "win"), "KXNFLSPREAD": ("nfl", "margin"), "KXNFLTOTAL": ("nfl", "total"), "KXNFLTEAMTOTAL": ("nfl", "tpts"),
+    "KXNHLGAME": ("nhl", "win"), "KXNHLSPREAD": ("nhl", "margin"), "KXNHLTOTAL": ("nhl", "total"), "KXNHLTEAMTOTAL": ("nhl", "tpts"),
+}
+TEAM_LABEL = {"win": "Moneyline", "margin": "Spread", "total": "Game total", "tpts": "Team total"}
+
+# Kalshi team codes that differ from ESPN's abbreviations
+TEAM_ALIASES = {
+    "nba": {"WAS": "WSH", "NYK": "NY", "NOP": "NO", "GSW": "GS", "SAS": "SA", "UTA": "UTAH", "PHO": "PHX", "BRK": "BKN"},
+    "nfl": {"JAC": "JAX", "WAS": "WSH", "LA": "LAR", "LV": "LV"},
+    "nhl": {"SJS": "SJ", "TBL": "TB", "NJD": "NJ", "LAK": "LA", "UTA": "UTAH", "WAS": "WSH", "MON": "MTL"},
+}
+
+
+def team_match(league, kcode, abbr):
+    if not kcode or not abbr:
+        return False
+    k = TEAM_ALIASES.get(league, {}).get(kcode, kcode)
+    return k == abbr or kcode == abbr
+
 MONTHS = {m: i for i, m in enumerate(
     ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"], 1)}
 EVENT_RE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})([A-Z]+)$")
@@ -175,7 +201,11 @@ SLUGS = {'KXNBAPTS': 'nba-player-points',
     'KXNHLGOAL': 'nhl-goalscorer',
     'KXNHLPTS': 'pro-hockey-points',
     'KXNHLAST': 'pro-hockey-assists',
-    'KXNHLSAVE': 'goaltender-saves'}
+    'KXNHLSAVE': 'goaltender-saves',
+    'KXNBAGAME': 'nba-game', 'KXNBASPREAD': 'nba-spread', 'KXNBATOTAL': 'nba-total', 'KXNBATEAMTOTAL': 'nba-team-total',
+    'KXNFLGAME': 'nfl-game', 'KXNFLSPREAD': 'pro-football-spread', 'KXNFLTOTAL': 'pro-football-total-points',
+    'KXNFLTEAMTOTAL': 'pro-football-team-total-points', 'KXNHLGAME': 'nhl-game', 'KXNHLSPREAD': 'nhl-spread',
+    'KXNHLTOTAL': 'nhl-total-goals', 'KXNHLTEAMTOTAL': 'nhl-team-goals-scored-during-game'}
 
 
 def market_url(series, event):
@@ -183,18 +213,71 @@ def market_url(series, event):
     return f"https://kalshi.com/markets/{series.lower()}/{slug}/{event.lower()}"
 
 
-def load_props(log):
-    """Return (props, base_used, series_counts)."""
-    base = None
+def parse_team_market(series, mk):
+    league, kind = TEAM_SERIES[series]
+    event = mk.get("event_ticker") or ""
+    date, teams = parse_event(event)
+    m = re.match(r"^([A-Z]*)(\d*)$", (mk.get("ticker") or "").split("-")[-1])
+    if not date or not teams or not m:
+        return None
+    code = m.group(1) or None
+    if kind == "win":
+        if not code or code == "TIE":
+            return None
+        line = 1                                   # won = won by 1 or more
+    else:
+        fs = _f(mk.get("floor_strike"))
+        if fs is None or mk.get("strike_type") not in ("greater", None):
+            return None
+        line = int(fs // 1) + 1                    # "over 8.5" -> 9 or more
+        if kind == "total":
+            code = None
+        elif not code:
+            return None
+    return {
+        "series": series, "league": league, "kind": kind, "stat": kind, "stat_label": TEAM_LABEL[kind],
+        "ticker": mk.get("ticker"), "event": event, "date": date.isoformat(), "teams": teams, "k_team": code,
+        "line": line, "title": mk.get("title"),
+        "yes_bid": price(mk, "yes_bid"), "yes_ask": price(mk, "yes_ask"), "no_bid": price(mk, "no_bid"),
+        "no_ask": price(mk, "no_ask"), "last": price(mk, "last_price"), "volume": qty(mk, "volume"),
+        "vol24": qty(mk, "volume_24h"), "oi": qty(mk, "open_interest"), "close_time": mk.get("close_time"),
+    }
+
+
+def pick_base(log):
     for b in BASES:
         try:
             get_json(b + "/exchange/status")
-            base = b
-            break
+            return b
         except Exception as e:  # noqa: BLE001
             log(f"kalshi base unavailable {b}: {e!r}"[:200])
-    if base is None:
-        base = BASES[0]
+    return BASES[0]
+
+
+def load_team(base, log):
+    """Open moneyline, spread, game total and team total markets. Returns (markets, series_counts)."""
+    out, counts = [], {}
+    for series in TEAM_SERIES:
+        try:
+            mks = fetch_series(base, series)
+        except Exception as e:  # noqa: BLE001
+            log(f"kalshi {series} failed: {e!r}"[:200])
+            continue
+        n = 0
+        for mk in mks:
+            if mk.get("status") not in ("active", "open", None):
+                continue
+            t = parse_team_market(series, mk)
+            if t:
+                out.append(t)
+                n += 1
+        counts[series] = n
+    return out, counts
+
+
+def load_props(log, base=None):
+    """Return (props, base_used, series_counts)."""
+    base = base or pick_base(log)
     props, counts = [], {}
     for series in SERIES:
         try:
