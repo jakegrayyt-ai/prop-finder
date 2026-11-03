@@ -15,6 +15,12 @@ A GitHub Actions job (`.github/workflows/update.yml`) is scheduled every 10 minu
 4. **The edge** compares that to Kalshi's price after the fee (0.07 × price × (1 − price) per contract). Kalshi's price is treated as a strong prior, so the model only moves it part of the way. When a liquid market and the model disagree by more than 15 points, the prop is flagged **Check news**, and the edge stays close to the market. A gap that size usually means an injury or lineup change the box scores don't show yet.
 5. The results are written to `site/data/` and published to the `gh-pages` branch, which GitHub Pages serves.
 
+## Picks page
+
+**https://jakegrayyt-ai.github.io/prop-finder/picks.html**
+
+The 10 best player props for today's NBA, NFL and NHL games that haven't started, ranked by the board's edge after Kalshi's fee. A prop only makes the list if the side you'd buy costs 20–80¢ (no long shots), its last 10 games and this season agree with that side, its confidence is medium or high, it has at least 10 contracts traded, and the player has no injury tag, missed games, role change or "check news" flag. One line per player, at most 3 picks per game. Each pick shows why (hit rates, model vs price, projection and matchup) and links to the full breakdown on the board. The list refreshes as prices move, and games drop off once they start.
+
 ## Arbitrage page
 
 **https://jakegrayyt-ai.github.io/prop-finder/arb.html**
@@ -112,5 +118,5 @@ pipeline/stats.py      hit rates, splits, streaks
 pipeline/model.py      projection, probability, Kalshi fee and edge
 pipeline/arb.py        Kalshi vs Polymarket US arbitrage scanner
 pipeline/build.py      ties it together and writes site/data/
-site/                  the website (plain HTML, CSS and JavaScript)
+site/                  the website (plain HTML, CSS and JavaScript); picks.js builds the Picks page from board.json
 ```

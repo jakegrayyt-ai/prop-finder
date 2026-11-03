@@ -390,3 +390,38 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 }
 
 [hidden] { display: none !important; }
+
+/* ---------- picks page ---------- */
+.picks-head { padding: 20px 0 4px; max-width: 80ch; }
+.picks-head h2 { margin: 0 0 4px; font: 700 30px/1.1 var(--display); letter-spacing: .01em; }
+.picks-head .sub { margin: 0; color: var(--ink-2); }
+.picks { list-style: none; margin: 14px 0 18px; padding: 0; display: grid; gap: 10px; }
+.pick { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 6px 18px; align-items: start;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.pick .rk { font: 700 34px/1 var(--display); color: var(--ink-3); text-align: center; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.pick:first-child { border-color: var(--line-2); }
+.pick:first-child .rk { color: var(--accent); }
+.pk-who .pname { display: inline; font-size: 18px; margin-right: 8px; white-space: normal; }
+.pk-who .meta { display: inline-flex; }
+.pk-bet { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 8px 0 4px; }
+.pk-bet b { font: 700 24px/1.1 var(--display); }
+.pk-side { font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 5px; align-self: center; }
+.pk-side.yes { background: var(--hit-wash); color: var(--hit); }
+.pk-side.no { background: var(--miss-wash); color: #f08aa5; }
+.pk-px { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pk-why { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; color: var(--ink-2); font-size: 14px; }
+.pk-why li { padding-left: 12px; position: relative; }
+.pk-why li::before { content: ""; position: absolute; left: 0; top: .6em; width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3); }
+.pk-end { display: grid; justify-items: end; gap: 8px; text-align: right; }
+.pk-edge .edge { font-size: 24px; }
+.pk-edge small { display: block; color: var(--ink-3); font-size: 12px; max-width: 140px; margin-top: 2px; }
+.pk-links { display: flex; gap: 14px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+@media (max-width: 760px) {
+  .picks-head h2 { font-size: 26px; }
+  .pick { grid-template-columns: 30px minmax(0, 1fr); gap: 6px 12px; padding: 12px; }
+  .pick .rk { font-size: 26px; }
+  .pk-end { grid-column: 2; justify-items: start; text-align: left; grid-template-columns: auto 1fr; align-items: center; column-gap: 14px; }
+  .pk-edge small { max-width: none; }
+  .pk-links { grid-column: 1 / -1; }
+  .pk-bet b { font-size: 22px; }
+}

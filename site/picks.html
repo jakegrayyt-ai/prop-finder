@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prop Finder: Picks</title>
+<meta name="description" content="The 10 Kalshi player props with the best edge after fees for today's NBA, NFL and NHL games.">
+<meta name="theme-color" content="#0c1430">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c1430'/%3E%3Crect x='6' y='16' width='4' height='10' rx='1.5' fill='%23d9446b'/%3E%3Crect x='12' y='9' width='4' height='17' rx='1.5' fill='%2334d399'/%3E%3Crect x='18' y='12' width='4' height='14' rx='1.5' fill='%2334d399'/%3E%3Crect x='24' y='6' width='4' height='20' rx='1.5' fill='%2334d399'/%3E%3Cpath d='M4 14h24' stroke='%23e8ecfa' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#picks">Skip to the picks</a>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="16" width="5" height="12" rx="1.5" class="m-miss"/><rect x="9.5" y="8" width="5" height="20" rx="1.5" class="m-hit"/><rect x="17" y="12" width="5" height="16" rx="1.5" class="m-hit"/><rect x="24.5" y="4" width="5" height="24" rx="1.5" class="m-hit"/><path d="M0 14h32" class="m-line"/></svg>
+      <h1>Prop Finder</h1>
+      <nav class="pages" aria-label="Pages"><a href="./">Props</a><a href="picks.html" aria-current="page">Picks</a><a href="arb.html">Arbitrage</a></nav>
+    </div>
+    <p class="updated" id="updated" aria-live="polite">Loading picks…</p>
+  </div>
+</header>
+
+<main>
+  <section class="picks-head">
+    <h2 id="pk-title">Top 10 player props today</h2>
+    <p class="sub" id="pk-sub"></p>
+  </section>
+  <ol class="picks" id="picks" aria-labelledby="pk-title"></ol>
+  <p class="empty" id="empty" hidden></p>
+
+  <details class="key">
+    <summary>How the picks are chosen</summary>
+    <p>Every Kalshi player prop for today’s NBA, NFL and NHL games that hasn’t started yet, ranked by edge: the expected profit per $1 contract after Kalshi’s fee, using the same model as the props board.</p>
+    <p>To make the list, a prop also has to pass a few checks. The side you’d buy costs between 20¢ and 80¢, so no long shots. Its last 10 games and this season agree with the side, not just the model. Its confidence is medium or high and it has had at least 10 contracts traded. The player has no injury tag, no missed games, no role change and no sign of news the stats don’t know about. Each player appears once (his best line), and no game has more than 3 picks.</p>
+    <p>The list refreshes as prices move, so it can change during the day, and games drop off once they start.</p>
+  </details>
+
+  <footer class="foot">
+    <p>Edges here are small, often 1 to 3¢ per $1, and the model only knows box scores. These are the best-looking bets by the numbers, not sure things. Check the live price on Kalshi before you trade, and only bet what you can afford to lose.</p>
+  </footer>
+</main>
+
+<script src="picks.js" defer></script>
+</body>
+</html>
