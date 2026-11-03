@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Prop Finder</title>
-<meta name="description" content="Kalshi NBA, NFL and NHL player props with hit rates, splits, matchups and a fee-adjusted edge.">
+<meta name="description" content="Kalshi NBA, NFL and NHL player props and team bets with hit rates, splits, matchups and a fee-adjusted edge.">
 <meta name="theme-color" content="#0c1430">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c1430'/%3E%3Crect x='6' y='16' width='4' height='10' rx='1.5' fill='%23d9446b'/%3E%3Crect x='12' y='9' width='4' height='17' rx='1.5' fill='%2334d399'/%3E%3Crect x='18' y='12' width='4' height='14' rx='1.5' fill='%2334d399'/%3E%3Crect x='24' y='6' width='4' height='20' rx='1.5' fill='%2334d399'/%3E%3Cpath d='M4 14h24' stroke='%23e8ecfa' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<a class="skip" href="#board">Skip to props</a>
+<a class="skip" href="#board">Skip to the board</a>
 <header class="top">
   <div class="top-inner">
     <div class="brand">
@@ -21,7 +21,7 @@
       <h1>Prop Finder</h1>
       <nav class="pages" aria-label="Pages"><a href="./" aria-current="page">Props</a><a href="arb.html">Arbitrage</a></nav>
     </div>
-    <p class="updated" id="updated" aria-live="polite">Loading props…</p>
+    <p class="updated" id="updated" aria-live="polite">Loading…</p>
   </div>
   <nav class="leagues" aria-label="League" id="leagues"></nav>
 </header>
@@ -33,6 +33,7 @@
       <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>
       <input id="q" type="search" placeholder="Search player or team" autocomplete="off">
     </label>
+    <label class="sel"><span>Bets</span><select id="kind"></select></label>
     <label class="sel"><span>Stat</span><select id="stat"></select></label>
     <label class="sel"><span>Game</span><select id="game"></select></label>
     <label class="sel"><span>Sort</span>
@@ -46,7 +47,7 @@
         <option value="time">Game time</option>
       </select>
     </label>
-    <label class="tog"><input type="checkbox" id="best" checked><span>Best line per player</span></label>
+    <label class="tog"><input type="checkbox" id="best" checked><span>Best line only</span></label>
     <label class="tog"><input type="checkbox" id="hideLow"><span>Hide low confidence</span></label>
   </section>
 
@@ -55,12 +56,13 @@
     <p><span class="sw g"></span>Green hit rates mean the player has reached the line more often than Kalshi’s price implies. <span class="sw r"></span>Red means less often.</p>
     <p>Model is a stats-only estimate from this season and last season, adjusted for the matchup, home or away, the game’s betting total and rest. Edge is the expected profit per $1 contract after Kalshi’s fee. It leans on Kalshi’s price, and leans harder when the two disagree a lot, because a big gap usually means news the stats don’t have yet.</p>
     <p><span class="sw x"></span>Grey bars are games he left early hurt: he played far less than usual, then missed games or went on the injury report. They don’t count in hit rates or the model, since a game he left in the first quarter says little about tonight. Players who missed their team’s last games are flagged.</p>
-    <p>Tap any row to see every game, every Kalshi line for that stat, and how the model got its number.</p>
+    <p>Team bets are Kalshi’s moneylines, spreads, team totals and game totals. Their hit rates come from the team’s results this season and last season: “−8.5” means the team won by 9 or more, “O 112.5” means 113 or more. A game total counts both teams’ games. Margins can go below zero (a loss), so their bars hang down. The model rates each team’s scoring and defense against the teams it played and projects tonight’s score.</p>
+    <p>Tap any row to see every game, every Kalshi line for that bet, and how the model got its number.</p>
   </details>
 
-  <section id="board" class="board" role="table" aria-label="Player props" aria-rowcount="-1">
+  <section id="board" class="board" role="table" aria-label="Player props and team bets" aria-rowcount="-1">
     <div class="row head" role="row">
-      <div class="c-player" role="columnheader">Player</div>
+      <div class="c-player" role="columnheader">Player or team</div>
       <div class="c-prop" role="columnheader">Line</div>
       <div class="c-kalshi" role="columnheader">Kalshi</div>
       <div class="c-strip" role="columnheader">Last 10</div>
@@ -79,11 +81,11 @@
     </div>
     <div id="rows"></div>
   </section>
-  <div class="more"><button id="more" hidden>Show more props</button></div>
+  <div class="more"><button id="more" hidden>Show more</button></div>
   <p class="empty" id="empty" hidden></p>
 
   <footer class="foot">
-    <p>Lines and prices from Kalshi. Stats, schedules, injuries and betting totals from ESPN, which is also one of Kalshi's settlement sources. The board updates on GitHub’s schedule, usually every 10 to 60 minutes (the time it last updated is at the top), so check the live price on Kalshi before you trade.</p>
+    <p>Lines and prices from Kalshi. Stats, scores, schedules, injuries and betting lines from ESPN, which is also one of Kalshi's settlement sources. The board updates on GitHub’s schedule, usually every 10 to 60 minutes (the time it last updated is at the top), so check the live price on Kalshi before you trade.</p>
     <p>Past results don't guarantee future ones. The model is a starting point for your own research, not a sure thing.</p>
   </footer>
 </main>

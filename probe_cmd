@@ -1,0 +1,5 @@
+set -e
+export PROP_OUT=debug
+mkdir -p debug/p
+python -m pipeline.build
+cp -r site/index.html site/app.js site/styles.css debug/ 

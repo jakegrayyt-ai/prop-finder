@@ -188,6 +188,39 @@ def games_on(league, date):
     return scoreboard(league, {"dates": date.strftime("%Y%m%d")}, f"espn/{league}/sb/{date.isoformat()}", ttl)
 
 
+def _score(x):
+    """Scoreboards send scores as strings, team schedules as {"value": 113.0, "displayValue": "113"}."""
+    if isinstance(x, dict):
+        v = num(x.get("value"))
+        return v if v is not None else num(x.get("displayValue"))
+    return num(x)
+
+
+def team_schedule(league, tid, season):
+    """A team's regular-season games for one season, in the same shape as scoreboard games.
+    Used for last season, which never changes, so it caches for a month."""
+    def fetch():
+        d = get_json(f"{SITE}/{PATH[league]}/teams/{tid}/schedule", params={"season": season, "seasontype": 2})
+        out = []
+        for e in d.get("events") or []:
+            comp = (e.get("competitions") or [{}])[0]
+            side = {c.get("homeAway"): c for c in comp.get("competitors") or []}
+            h, a = side.get("home") or {}, side.get("away") or {}
+            st = ((comp.get("status") or e.get("status") or {}).get("type")) or {}
+            out.append({
+                "eid": e.get("id"), "league": league, "start": e.get("date"), "date": et_date(e.get("date")),
+                "state": st.get("state"), "completed": bool(st.get("completed")), "detail": st.get("shortDetail"),
+                "season_type": (e.get("seasonType") or {}).get("type"),
+                "home_id": (h.get("team") or {}).get("id") or h.get("id"), "home": (h.get("team") or {}).get("abbreviation"),
+                "home_name": (h.get("team") or {}).get("displayName"), "home_score": _score(h.get("score")),
+                "away_id": (a.get("team") or {}).get("id") or a.get("id"), "away": (a.get("team") or {}).get("abbreviation"),
+                "away_name": (a.get("team") or {}).get("displayName"), "away_score": _score(a.get("score")),
+                "neutral": bool(comp.get("neutralSite")),
+            })
+        return out
+    return cache.cached(f"espn/{league}/sched/{season}/{tid}", 30 * 24 * HOUR, fetch)
+
+
 def nfl_week(season, week):
     return scoreboard("nfl", {"week": week, "seasontype": 2, "dates": season},
                       f"espn/nfl/sbw/{season}-{week}", 10 * 60)
@@ -211,9 +244,11 @@ def injuries(league):
                     continue
                 det = i.get("details") or {}
                 out[aid] = {"status": i.get("status"), "note": i.get("shortComment"), "date": i.get("date"),
-                            "type": det.get("type"), "ret": det.get("returnDate")}
+                            "type": det.get("type"), "ret": det.get("returnDate"),
+                            "name": a.get("displayName"), "pos": (a.get("position") or {}).get("abbreviation"),
+                            "team_id": t.get("id") or (a.get("team") or {}).get("id")}
         return out
-    return cache.cached(f"espn/{league}/injuries", 15 * 60, fetch)
+    return cache.cached(f"espn/{league}/injuries2", 15 * 60, fetch)
 
 
 # ------------------------------------------------------------------ stat derivation
