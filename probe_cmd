@@ -1,4 +1,10 @@
 set -e
 export PROP_OUT=debug
-mkdir -p debug
-python -m pipeline.probe_backtest
+mkdir -p debug/p
+start=$(date +%s)
+python -m pipeline.build
+echo "build took $(( $(date +%s) - start ))s" > debug/timing.txt
+cp -r site/index.html site/app.js site/styles.css site/picks.html site/picks.js debug/
+rm -rf debug/p_keep && mkdir -p debug/p_keep
+find debug/p \( -name '*-t-*' -o -name '*-g-*' \) | head -1500 | xargs -I{} cp {} debug/p_keep/ 2>/dev/null || true
+rm -rf debug/p && mv debug/p_keep debug/p
