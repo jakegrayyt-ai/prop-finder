@@ -367,10 +367,11 @@
     const day = new Date(C.today + 'T12:00:00').toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
     $('#pk-title').textContent = `Top 10 ${word ? word + ' ' : ''}picks today`;
     let sub = day + '.';
-    if (picks.length) {
-      sub += ` The ${picks.length === N ? N : picks.length} best edges out of ${cnt.open.toLocaleString()} ${word ? word + ' ' : ''}bets for games that haven’t started yet.`;
+    const n = picks.length;
+    if (n) {
+      sub += ` ${n === 1 ? 'The best edge' : `The ${n} best edges`} out of ${cnt.open.toLocaleString()} ${word ? word + ' ' : ''}bets for games that haven’t started yet.`;
       if (sport === 'all') sub += ` At most ${PER_SPORT_ALL} from one sport.`;
-      if (picks.length < N) sub += ` Only ${picks.length} pass every check right now.`;
+      if (n < N) sub += n === 1 ? ' It’s the only one that passes every check right now.' : ` Only ${n} pass every check right now.`;
     }
     $('#pk-sub').textContent = sub;
     $('#picks').innerHTML = picks.map((c, i) => cardHTML(c, i, details.get(c.r.id))).join('');

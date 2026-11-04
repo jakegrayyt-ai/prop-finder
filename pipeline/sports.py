@@ -679,9 +679,13 @@ def save_closing(rows, games, today):
     saved = cache.get(CLOSE_KEY) or {}
     cut = (today - dt.timedelta(days=CLOSE_DAYS)).isoformat()
     saved = {t: v for t, v in saved.items() if v[3] >= cut}
+    side = {t.rsplit("-", 1)[0]: t for t in saved}          # one side per match is enough: the other mirrors it
     for r in rows:
         g = games.get(r["gid"]) or {}
         if r.get("el") and r["stat"] == "win" and g.get("state") == "pre" and r.get("kraw") and r["mid"] is not None:
+            ev = r["id"].rsplit("-", 1)[0]
+            if side.setdefault(ev, r["id"]) != r["id"]:
+                continue
             saved[r["id"]] = [r["mid"], r["p"], r["kraw"], g.get("date") or today.isoformat(), r["grp"]]
     cache.put(CLOSE_KEY, saved)
     return len(saved)
