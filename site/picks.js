@@ -40,7 +40,7 @@
 
   // What a bet has to pass to be a pick (the board shows everything; this list is the cream)
   const N = 10, PER_GAME = 3, PER_GAME_BETS = 2, PER_SPORT_ALL = 4;
-  const MIN_EDGE = 0.005, MIN_PRICE = 0.20, MAX_PRICE = 0.80, MIN_VOL = 10, MIN_RATED = 8;
+  const MIN_EDGE = 0.001, MIN_PRICE = 0.20, MAX_PRICE = 0.80, MIN_VOL = 10, MIN_RATED = 8;
   const BLOCK = new Set(['Questionable', 'Doubtful', 'Out', 'Day-To-Day', 'Injured Reserve', 'Suspension', 'Check news', 'Wide spread',
     'No trades yet', 'Small sample', 'Left last game hurt', 'First game this season', 'Long layoff', 'Role change', 'Live']);
 
@@ -380,7 +380,7 @@
       const w = word ? word + ' ' : '';
       empty.textContent = !cnt.todays ? `Kalshi has nothing posted for today’s ${w}games yet.`
         : !cnt.open ? `Today’s ${w}games have all started. Tomorrow’s picks show up once Kalshi posts those markets.`
-          : `No ${w}bet for today’s games passes every check right now${sport === 'all' || ['nba', 'nfl', 'nhl'].includes(sport) ? '' : ': Kalshi’s prices and the ratings mostly agree, so nothing shows an edge after the fee'}. The board still has all of them.`;
+          : `No ${w}bet for today’s games passes every check right now${sport === 'all' || ['nba', 'nfl', 'nhl'].includes(sport) ? '' : '. The edge leans mostly on Kalshi’s price, and none of what’s left clears the fee'}. The board still has all of them.`;
     }
     renderTabs();
     return picks;

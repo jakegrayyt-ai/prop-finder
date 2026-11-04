@@ -20,7 +20,7 @@ from collections import defaultdict
 NEUTRAL = {"tennis", "esports", "fights"}            # no home side
 SCALES = (0.5, 0.65, 0.8, 1.0, 1.2, 1.4, 1.7, 2.0)   # stretch of the rating gap (ratings trained on a short history
 HOMES = (-60, -30, 0, 30, 60, 90)                    # are squeezed toward the middle); home edge in rating points
-MIN_PRIOR = 3                                        # matches each side needs before its prediction is scored
+MIN_PRIOR = 8                                        # matches each side needs before its prediction is scored
 
 
 def k_factor(n):
