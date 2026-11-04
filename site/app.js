@@ -822,14 +822,17 @@
     if (r.best === 'yes' && yesFee != null) edgeLine = `Buying yes at ${cents(r.k.ya)} plus about ${(yesFee * 100).toFixed(1)}¢ fee: ${signed(r.e.yes * 100)}¢ expected per $1 contract`;
     else if (r.best === 'no' && noFee != null) edgeLine = `Buying no at ${cents(r.k.na)} plus about ${(noFee * 100).toFixed(1)}¢ fee: ${signed(r.e.no * 100)}¢ expected per $1 contract`;
     const gap = r.p != null && r.mid != null ? r.p - r.mid : null;
-    const blendWhy = det.k == null ? '' : isK(r)
+    const elo = det.m === 'elo';
+    const blendWhy = det.k == null ? '' : elo
+      ? `Moves ${Math.round(det.k * 100)}% of the way from Kalshi’s price toward the ratings, less for long shots, for sides with few results and when the ratings have predicted this league poorly. They only know who won, not injuries or lineups, so the price does most of the work.`
+      : isK(r)
       ? `Moves ${Math.round(det.k * 100)}% of the way from Kalshi’s price toward the trend estimate, less for long shots. Past results alone say little about tonight, so the price does most of the work.`
       : r.flags.includes('Check news')
       ? `The stats and the market disagree by ${Math.round(Math.abs(gap) * 100)} points. With team bets that usually means something the scores don’t show, like a star out or resting, so this barely moves off Kalshi’s price.`
       : `Moves ${Math.round(det.k * 100)}% of the way from Kalshi’s price toward the stats model. Team bets are Kalshi’s busiest markets, so the price already knows most of what the scores know.`;
     const blendLi = r.pb == null ? '' : `<li><span>Used for the edge<br><small class="note">${esc(blendWhy)}</small></span><b>${pct(r.pb)}</b></li>`;
     return `<div class="sec"><h3>How the model sees it</h3><ul class="steps">${li}
-      <li class="total"><span>${isK(r) ? 'Trend model' : 'Stats model'}: chance of yes (${esc(lineTxt(r))})</span><b>${pct(r.p)}</b></li>
+      <li class="total"><span>${elo ? 'Ratings model' : isK(r) ? 'Trend model' : 'Stats model'}: chance of yes (${esc(lineTxt(r))})</span><b>${pct(r.p)}</b></li>
       <li><span>Kalshi’s price implies</span><b>${pct(r.mid)}</b></li>${blendLi}</ul>
       ${edgeLine ? `<p class="note">${esc(edgeLine)}. ${r.be > 0 ? 'Positive means the model thinks this side is underpriced.' : 'Negative means neither side looks underpriced after the fee.'}</p>` : ''}
       ${r.flags.length ? `<p class="note">Heads up: ${esc(r.flags.join(', ').toLowerCase())}${det.key_out && det.key_out.length ? ` (${esc(det.key_out.join(', '))})` : ''}.</p>` : ''}</div>`;

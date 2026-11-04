@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Prop Finder</title>
-<meta name="description" content="Kalshi NBA, NFL and NHL player props and team bets with hit rates, splits, matchups and a fee-adjusted edge.">
+<meta name="description" content="Kalshi player props and team bets for the NBA, NFL and NHL, plus every other sport on Kalshi, with hit rates, splits and a fee-adjusted edge.">
 <meta name="theme-color" content="#0c1430">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c1430'/%3E%3Crect x='6' y='16' width='4' height='10' rx='1.5' fill='%23d9446b'/%3E%3Crect x='12' y='9' width='4' height='17' rx='1.5' fill='%2334d399'/%3E%3Crect x='18' y='12' width='4' height='14' rx='1.5' fill='%2334d399'/%3E%3Crect x='24' y='6' width='4' height='20' rx='1.5' fill='%2334d399'/%3E%3Cpath d='M4 14h24' stroke='%23e8ecfa' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,7 +19,7 @@
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="16" width="5" height="12" rx="1.5" class="m-miss"/><rect x="9.5" y="8" width="5" height="20" rx="1.5" class="m-hit"/><rect x="17" y="12" width="5" height="16" rx="1.5" class="m-hit"/><rect x="24.5" y="4" width="5" height="24" rx="1.5" class="m-hit"/><path d="M0 14h32" class="m-line"/></svg>
       <h1>Prop Finder</h1>
-      <nav class="pages" aria-label="Pages"><a href="./" aria-current="page">Props</a><a href="arb.html">Arbitrage</a></nav>
+      <nav class="pages" aria-label="Pages"><a href="./" aria-current="page">Props</a><a href="picks.html">Picks</a></nav>
     </div>
     <p class="updated" id="updated" aria-live="polite">Loading…</p>
   </div>
@@ -57,6 +57,7 @@
     <p>Model is a stats-only estimate from this season and last season, adjusted for the matchup, home or away, the game’s betting total and rest. Edge is the expected profit per $1 contract after Kalshi’s fee. It leans on Kalshi’s price, and leans harder when the two disagree a lot, because a big gap usually means news the stats don’t have yet.</p>
     <p><span class="sw x"></span>Grey bars are games he left early hurt: he played far less than usual, then missed games or went on the injury report. They don’t count in hit rates or the model, since a game he left in the first quarter says little about tonight. Players who missed their team’s last games are flagged.</p>
     <p>Team bets are Kalshi’s moneylines, spreads, team totals and game totals. Their hit rates come from the team’s results this season and last season: “−8.5” means the team won by 9 or more, “O 112.5” means 113 or more. A game total counts both teams’ games. Margins can go below zero (a loss), so their bars hang down. The model rates each team’s scoring and defense against the teams it played and projects tonight’s score.</p>
+    <p>Every other sport on Kalshi (college, soccer, tennis, fights, esports, cricket and more) has its own chip. Kalshi only lists game markets there, so those rows are winners, spreads and totals. Their history comes from Kalshi’s own settled markets, which start in late summer. Winner markets are modeled with Elo ratings built from every result Kalshi has settled, older ones included, so beating a strong team counts for more than beating a weak one (tennis players are rated across the ATP or WTA, Challenger and ITF tours). Spreads and totals use the team’s hit rate on that line, pulled toward Kalshi’s price.</p>
     <p>Tap any row to see every game, every Kalshi line for that bet, and how the model got its number.</p>
   </details>
 
@@ -85,7 +86,7 @@
   <p class="empty" id="empty" hidden></p>
 
   <footer class="foot">
-    <p>Lines and prices from Kalshi. Stats, scores, schedules, injuries and betting lines from ESPN, which is also one of Kalshi's settlement sources. The board updates on GitHub’s schedule, usually every 10 to 60 minutes (the time it last updated is at the top), so check the live price on Kalshi before you trade.</p>
+    <p>Lines and prices from Kalshi. For the NBA, NFL and NHL, stats, scores, schedules, injuries and betting lines come from ESPN, which is also one of Kalshi's settlement sources. For every other sport, results come from Kalshi's own settled markets. The board updates on GitHub’s schedule, usually every 10 to 60 minutes (the time it last updated is at the top), so check the live price on Kalshi before you trade.</p>
     <p>Past results don't guarantee future ones. The model is a starting point for your own research, not a sure thing.</p>
   </footer>
 </main>
