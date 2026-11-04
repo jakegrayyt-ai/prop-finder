@@ -335,58 +335,10 @@ h1 { margin: 0; font: 700 26px/1 var(--display); letter-spacing: .01em; }
 .pages a[aria-current="page"] { background: var(--accent-wash); color: var(--ink); }
 .pages a:hover { color: var(--ink); }
 
-/* ---------- arbitrage page ---------- */
-.arb-summary { padding: 18px 0 4px; max-width: 80ch; }
-.arb-summary .lead { font-size: 19px; margin: 0 0 6px; }
-.arb-summary .lead b.pos { color: var(--hit); }
-.arb-summary .sub { margin: 0; color: var(--ink-2); }
-.arb-counts { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0; margin: 10px 0 0; color: var(--ink-3); font-size: 14px; }
-.arb-counts b { color: var(--ink); font-variant-numeric: tabular-nums; }
-.sel.stake { min-width: 140px; }
-.money { display: flex; align-items: center; height: 40px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); padding: 0 10px; gap: 4px; }
-.money:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.money input { border: 0; background: transparent; width: 96px; height: 38px; outline: none; font-variant-numeric: tabular-nums; }
-.arb-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); margin: 6px 0 0; }
-.arb { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 12px; min-width: 0; }
-.arb.is-arb { border-color: var(--hit); box-shadow: inset 4px 0 0 var(--hit); }
-.arb-head { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--ink-3); font-size: 13px; }
-.arb-head .lgtag { color: var(--ink-2); font-weight: 700; }
-.arb-head .when { margin-left: auto; }
-.arb-game { margin: 4px 0 10px; font: 700 22px/1.1 var(--display); }
-.legs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.leg { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
-.leg .site { font-size: 13px; color: var(--ink-3); font-weight: 600; }
-.leg .buy { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.leg .buy b { font-weight: 600; }
-.leg .px { font: 700 22px/1 var(--display); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.leg .mk { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
-.leg .means { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
-.leg .meta2 { margin: 0; color: var(--ink-3); font-size: 12px; }
-.leg .go { font-size: 13px; font-weight: 600; margin-top: 2px; }
-.leg .go.muted { color: var(--ink-3); font-weight: 500; margin: 2px 0 0; }
-.leg .meta2.old { color: var(--warn); }
-.arb.is-maybe { border-color: var(--warn); box-shadow: inset 4px 0 0 var(--warn); }
-.arb.is-gone { opacity: .6; }
-.res.warn { color: var(--warn); }
-.arb-summary .lead b.warn { color: var(--warn); }
-.arb-summary .stale-note { color: var(--warn); margin-bottom: 6px; }
-.arb-summary .stale-note a { color: var(--warn); }
-.why { margin: 8px 0 0; padding: 8px 12px 8px 28px; background: var(--warn-wash); border-radius: 8px; color: var(--ink); font-size: 13px; display: grid; gap: 3px; }
-.arb-math { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-top: 12px; }
-.arb-math .tot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; color: var(--ink-3); font-size: 13px; }
-.arb-math .tot b { font: 700 22px/1 var(--display); color: var(--ink); font-variant-numeric: tabular-nums; }
-.res { font-weight: 700; }
-.res.pos { color: var(--hit); }
-.res.neg { color: var(--ink-3); font-weight: 600; }
-.plan { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; }
-.arb .note { margin: 6px 0 0; }
-.arb-risks ul { margin: 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 6px; max-width: 80ch; }
 @media (max-width: 760px) {
   .top-inner { flex-wrap: wrap; row-gap: 4px; }
   .updated { max-width: none; width: 100%; text-align: left; }
-  .legs { grid-template-columns: 1fr; }
   .pages { margin-left: 8px; }
-  .arb-game { font-size: 20px; }
 }
 
 [hidden] { display: none !important; }

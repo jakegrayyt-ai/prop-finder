@@ -21,33 +21,6 @@ A GitHub Actions job (`.github/workflows/update.yml`) is scheduled every 10 minu
 
 The 10 best player props for today's NBA, NFL and NHL games that haven't started, ranked by the board's edge after Kalshi's fee. A prop only makes the list if the side you'd buy costs 20–80¢ (no long shots), its last 10 games and this season agree with that side, its confidence is medium or high, it has at least 10 contracts traded, and the player has no injury tag, missed games, role change or "check news" flag. One line per player, at most 3 picks per game. Each pick shows why (hit rates, model vs price, projection and matchup) and links to the full breakdown on the board. The list refreshes as prices move, and games drop off once they start.
 
-## Arbitrage page
-
-**https://jakegrayyt-ai.github.io/prop-finder/arb.html**
-
-Every scan, `pipeline/arb.py` lists the next 6 days of games on both **Kalshi** and **Polymarket US** (the US-regulated app, not polymarket.com), for every sport both sites list:
-
-- NFL, NBA, NHL, college football, men's and women's college basketball
-- About 50 soccer leagues (Champions League, Premier League, La Liga, Serie A, Bundesliga, Ligue 1, MLS, Brasileirão and many smaller ones)
-- ATP, WTA, ITF and doubles tennis, UFC and boxing
-- Esports (CS2, Dota 2, League of Legends, Rainbow Six)
-- Basketball, hockey, baseball and cricket leagues outside the US (EuroLeague, CBA, KHL, AHL, KBO and others)
-
-It matches the same game on both sites by date and team or player names. US teams must match their school or city exactly, so Kentucky never pairs with Western Kentucky. Clubs abroad match on their distinctive words ("Everton" = "Everton FC"), and both teams have to match. Then it prices every pair of opposite bets:
-
-- Moneyline: Team A on one site + Team B on the other. Soccer is win, draw or win on both sites, so each outcome is paired with its own opposite (Arsenal wins on one site, Arsenal doesn't win on the other)
-- Spread and total, for the full game and the first half: Team A −X + Team B +X, Over T + Under T (the same X or T only)
-- Team totals, both teams to score
-- NBA, NFL and NHL player props: Kalshi's "Jaylen Brown: 25+ points" against Polymarket's "at least 25 points". If the player doesn't play, the sites may settle differently
-
-Polymarket's best bid or ask is often a dust order (a hundredth of a contract) that can't be traded, so each candidate is priced at what 1 full contract costs on the real order book, and pairs without 1 contract are dropped.
-
-A pair is an **arbitrage** when both prices plus both taker fees come to less than $1 per contract. Kalshi's fee is 0.07 × price × (1 − price). Polymarket US lists a fee rate on each market (0.0695 right now), applied the same way. Both round up per order. Games Polymarket US marks as live (or that start within 10 minutes) are skipped, and so are 1–2¢ longshots.
-
-The page re-checks Polymarket US prices every 30 seconds (its API allows that from a browser). Kalshi's API refuses requests from other websites, so Kalshi prices come from the last scan. Because of that, a newer Polymarket price is only allowed to make a pair look worse, never better: if Polymarket moved, Kalshi probably did too. A pair is shown as arbitrage only when Kalshi's price is under 15 minutes old, Polymarket hasn't moved 2¢ or more since the scan, and there's at least 1 contract on each side. Otherwise it's marked *re-check* with the reason. Cards disappear 2 minutes before the start (20 minutes for tennis, whose start times are estimates).
-
-Real arbitrage is rare. The two sites usually agree within a few cents, and the combined fee is about 3¢ at even odds. Before trading, check both live prices, the available size, and both sites' rules (NFL ties, tennis retirements and postponements can settle differently).
-
 ## Reading the board
 
 | Column | Meaning |
@@ -116,7 +89,6 @@ pipeline/sports.py     every other Kalshi sport: game markets, history from Kals
 pipeline/matchups.py   opponent defense vs position from this season's box scores
 pipeline/stats.py      hit rates, splits, streaks
 pipeline/model.py      projection, probability, Kalshi fee and edge
-pipeline/arb.py        Kalshi vs Polymarket US arbitrage scanner
 pipeline/build.py      ties it together and writes site/data/
 site/                  the website (plain HTML, CSS and JavaScript); picks.js builds the Picks page from board.json
 ```

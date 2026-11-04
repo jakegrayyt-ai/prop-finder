@@ -17,12 +17,13 @@ Kalshi's price because a couple of months of results says little on its own. The
 """
 import datetime as dt
 import math
+import os
 import re
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import arb, cache, model, stats
+from . import cache, elo, model, stats
 from . import kalshi as K
 from .net import get_json
 
@@ -54,6 +55,16 @@ SETTLED_TTL = 90 * 60               # top up each series' settled history at mos
 SETTLED_PAGES = 160                 # per run; the first backfill spreads over a few runs instead of tripping rate limits
 EMPTY_TTL = 3 * 3600                # a series with nothing open is checked again after this long
 NO_EXACT_MARGIN = {"tennis"}        # Kalshi's value on tennis game spreads isn't the margin
+HIST_TTL = 7 * 86400                # winners from before Kalshi's live window: refreshed weekly
+HIST_PAGES = int(os.environ.get("PROP_HIST_PAGES", 60))   # per run, so the first backfill spreads over a few runs
+ELO_K = (0.25, 0.35)                # how far the edge moves from the price toward the ratings (liquid, thin book)
+ELO_FULL_N = 15                     # results each side needs for the full weight
+ELO_FULL_SKILL = 0.08               # calibrated improvement on a coin flip that earns the full weight
+ELO_DECAY = 0.10                    # past a 10-point gap with the price, the weight fades
+ELO_NEWS = 0.20                     # past 20 points on a liquid market, flag it
+CLOSE_KEY = "kalshi/elo-closing"    # last price and rating forecast before each rated match starts
+CLOSE_DAYS = 45                     # how long those are kept for learning the weight
+FIT_PRIOR = 300                     # settled matches' worth of trust in the default weight
 
 
 def r2(x, n=3):
@@ -79,6 +90,33 @@ def slug(s):
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")[:40]
 
 
+EVENT_RE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(\d{4})?([A-Z0-9]+)$")   # 26NOV03 [1430] PENGAM
+
+
+def event_date(ev):
+    """'KXEPLGAME-26NOV08ARSCHE' -> 2026-11-08."""
+    part = ev.split("-", 1)[1] if "-" in ev else ev
+    m = EVENT_RE.match(part)
+    if not m:
+        return None
+    try:
+        return dt.date(2000 + int(m.group(1)), K.MONTHS[m.group(2)], int(m.group(3)))
+    except (KeyError, ValueError):
+        return None
+
+
+def fetch_open(series, log=print):
+    """One series' open markets, retried after a pause if Kalshi rate-limits us (HTTP 429)."""
+    for attempt in range(3):
+        try:
+            return series, K.fetch_series(BASE, series)
+        except Exception as e:  # noqa: BLE001
+            if attempt == 2:
+                log(f"sports: {series} failed {e!r}"[:200])
+            time.sleep(4 * (attempt + 1))
+    return series, []
+
+
 # ---------------------------------------------------------------- which series
 def league_series(log):
     """{league key: {"label", "group", "unit", "series": [(ticker, kind)]}} for every per-game sports series."""
@@ -87,7 +125,6 @@ def league_series(log):
         return [{"ticker": s.get("ticker"), "title": s.get("title") or "", "tags": s.get("tags") or []}
                 for s in d.get("series") or [] if (s.get("category") or "Sports") == "Sports"]
     series = cache.cached("kalshi/series-sports", 6 * 3600, fetch)
-    arb_label = {s: c["label"] for c in arb.LEAGUES.values() for s in c["game"]}
     out = {}
     for s in series:
         t = s["ticker"] or ""
@@ -97,11 +134,14 @@ def league_series(log):
             continue
         tag = (s["tags"] or [""])[0]
         group = STEM_GROUP.get(stem) or TAG_GROUP.get(tag) or "other"
-        lg = out.setdefault(stem[2:].lower(), {"label": None, "group": group, "unit": UNIT[group], "series": []})
+        key = stem[2:].lower()
+        if m and m.group(2) == "DOUBLES":
+            key += "dbl"                   # doubles pairs are their own league, not mixed in with singles players
+        lg = out.setdefault(key, {"label": None, "group": group, "unit": UNIT[group], "series": []})
         lg["series"].append((t, kind))
         if kind == "win":
             title = re.sub(r"\s+(Games?|Match(es)?|Fights?|Winner)$", "", s["title"]).strip()
-            lg["label"] = lg["label"] or title or arb_label.get(t)
+            lg["label"] = lg["label"] or title
     for key, lg in out.items():
         lg["label"] = lg["label"] or key.upper()
     log(f"sports: {len(out)} leagues, {sum(len(v['series']) for v in out.values())} series")
@@ -113,7 +153,7 @@ def parse(kind, mk):
     """One Kalshi market -> what it pays on. line: the whole number that wins (over 2.5 -> 3)."""
     ev = mk.get("event_ticker") or ""
     key = ev.split("-", 1)[1] if "-" in ev else ""
-    date = arb.k_event_date(ev)
+    date = event_date(ev)
     if not key or not date:
         return None
     suf = (mk.get("ticker") or "").rsplit("-", 1)[-1]
@@ -133,6 +173,55 @@ def parse(kind, mk):
         return {**base, "k": "total", "c": None, "line": line}
     code = re.sub(r"\d+$", "", suf)
     return {**base, "k": kind, "c": code, "line": line} if code else None
+
+
+def add_win(e, p, res):
+    """One settled winner (or draw) market into its event's summary."""
+    if p["k"] == "win":
+        e.setdefault("n", {})[p["c"]] = p["name"]
+    if res == "yes":
+        e["w"] = p["c"] or "TIE"
+    elif res not in ("yes", "no"):
+        e["void"] = 1          # cancelled, postponed or settled at a fair price
+
+
+def settled_old(series, budget):
+    """Winners Kalshi settled before its live API's window (about two months; older ones move to
+    /historical/markets). Only winners, since that's all the ratings need. One full pass per series, resumed across
+    runs with the saved cursor, then refreshed weekly. budget: shared list [pages left this run]."""
+    key = f"kalshi/hist-win/{series}"
+    data, saved = cache.entry(key)
+    if data and data.get("done") and time.time() - saved < HIST_TTL:
+        return data["ev"]
+    if budget[0] <= 0:
+        return (data or {}).get("ev", {})
+    if not data or data.get("done"):
+        data = {"ev": (data or {}).get("ev", {}), "cursor": None, "done": False}
+    cursor = data.get("cursor")
+    while budget[0] > 0:
+        params = {"series_ticker": series, "limit": 1000}
+        if cursor:
+            params["cursor"] = cursor
+        budget[0] -= 1
+        try:
+            d = get_json(BASE + "/historical/markets", params=params)
+        except Exception:
+            data["cursor"] = None          # maybe a stale cursor: start this series over next time
+            cache.put(key, data)
+            raise
+        mks = d.get("markets") or []
+        for mk in mks:
+            p = parse("win", mk)
+            if p:
+                add_win(data["ev"].setdefault(p["key"], {"d": p["date"]}), p, mk.get("result"))
+        cursor = d.get("cursor")
+        if not cursor or not mks:
+            data["done"], cursor = True, None
+            break
+        time.sleep(0.05)
+    data["cursor"] = cursor
+    cache.put(key, data)
+    return data["ev"]
 
 
 def settled(series, kind, budget):
@@ -164,12 +253,7 @@ def settled(series, kind, budget):
             res, val = mk.get("result"), mk.get("expiration_value")
             r = 1 if res == "yes" else 0 if res == "no" else None
             if kind == "win":
-                if p["k"] == "win":
-                    e.setdefault("n", {})[p["c"]] = p["name"]
-                if res == "yes":
-                    e["w"] = p["c"] or "TIE"
-                elif res not in ("yes", "no"):
-                    e["void"] = 1          # cancelled, postponed or settled at a fair price
+                add_win(e, p, res)
             elif kind == "btts" and res in ("yes", "no"):
                 e["b"] = 1 if res == "yes" else 0
             elif kind == "total":
@@ -251,7 +335,7 @@ def pick(value, lo, hi):
 
 def order_codes(key, codes):
     """'26OCT31ORSTFRES' + {'FRES', 'ORST'} -> ['ORST', 'FRES'] (the order in the ticker)."""
-    m = arb.EVENT_RE.match(key)
+    m = EVENT_RE.match(key)
     teams = m.group(5) if m else key
     cs = sorted(codes, key=len, reverse=True)
     for a in cs:
@@ -361,19 +445,39 @@ def evaluate(lg, cfg, m, q, ev, hist, ctx):
     p_model = model.clamp((hw + PRIOR * mid) / (w + PRIOR), 0.01, 0.99)
     n = len(vals)
     live = ev["state"] == "in"
+    tail = min(1.0, mid * (1 - mid) / 0.16)
+    E = ctx.get("elo") if kind == "win" else None
+    if E and E.get("p") is not None:
+        p_model = model.clamp(E["p"] - 0.5 * E["draw"], 0.01, 0.99)    # a draw counts half in the ratings
+        n_min = min(E["n"], E["n_opp"])
+        skill = E["skill"] or 0.0
+    else:
+        E = None
     flags = ["Live"] if live else []
     if not liquid:
         flags.append("Wide spread")
     if not q.get("vol"):
         flags.append("No trades yet")
-    if n < 5:
+    small = (n_min < 6) if E else (n < 5)
+    if small:
         flags.append("Small sample")
-    conf = "low" if (n < 5 or not liquid or live) else "med"
+    conf = "low" if (small or not liquid or live or (E and skill < 0.02)) else "med"
     gap = p_model - mid
-    p_blend, k = None, None
-    if not live:
+    if E and liquid and abs(gap) > ELO_NEWS:
+        flags.append("Check news")       # a gap this big usually means news the results don't know about
+    p_blend, k, kraw = None, None, None
+    if not live and E:
+        # the ratings know who beat whom, not injuries, form or surface, so the price still does most of the work,
+        # and more of it the further apart the two are. kraw is the default weight; m is what settled matches
+        # say the ratings deserve on top of it (learn_weights)
+        kraw = (ELO_K[0] if liquid else ELO_K[1]) * {"low": 0.5, "med": 1.0}[conf] * tail \
+            * min(1.0, n_min / ELO_FULL_N) * min(1.0, skill / ELO_FULL_SKILL) \
+            * math.exp(-max(0.0, abs(gap) - ELO_DECAY) / ELO_DECAY)
+        k = kraw * E["m"]
+        p_blend = model.clamp(mid + k * gap, 0.005, 0.995)
+    elif not live:
         # a raw hit rate doesn't know who the games were against, so it barely moves the price
-        k = (0.10 if liquid else 0.15) * {"low": 0.5, "med": 1.0}[conf] * min(1.0, mid * (1 - mid) / 0.16)
+        k = (0.10 if liquid else 0.15) * {"low": 0.5, "med": 1.0}[conf] * tail
         p_blend = model.clamp(mid + k * gap, 0.005, 0.995)
     e = model.edges(p_blend, ya, na)
     best = max(e, key=e.get) if e else None
@@ -396,6 +500,11 @@ def evaluate(lg, cfg, m, q, ev, hist, ctx):
     elif kind == "win" and any("margin" in x["s"] for x in played[:10]):
         known = [x["s"]["margin"] for x in played[:10] if "margin" in x["s"]]
         row["avg10"] = round(sum(known) / len(known), 2)
+    if E:
+        row["el"] = [round(E["r"]), round(E["r_opp"]), E["n"], E["n_opp"]]
+        if kraw is not None:
+            row["kraw"] = r2(kraw, 4)
+        return row, elo_details(E, mid, p_model, k)
     rate = (hw / w) if w else None
     det = {"k": r2(k), "steps": [
         ["Kalshi’s price", f"{mid * 100:.0f}%", "What traders think right now"],
@@ -404,6 +513,175 @@ def evaluate(lg, cfg, m, q, ev, hist, ctx):
         ["Trend estimate", f"{p_model * 100:.0f}%",
          f"The hit rate pulled toward the price with {PRIOR:.0f} games’ worth of weight, since a couple of months of results says little on its own"]]}
     return row, det
+
+
+def _ordinal(n):
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _md(iso):
+    d = dt.date.fromisoformat(iso)
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def elo_details(E, mid, p_model, k):
+    R = E["R"]
+
+    def note(x, n):
+        s = f"From {n} result{'s' if n != 1 else ''} on Kalshi"
+        if x in R["rank"]:
+            s += f", {_ordinal(R['rank'][x])} of {R['of']} rated in {E['label']}"
+        return s
+    steps = [["Kalshi’s price", f"{mid * 100:.0f}%", "What traders think right now"],
+             [f"{E['name']}’s rating", f"{E['r']:.0f}", note(E["me"], E["n"])],
+             [f"{E['name_opp']}’s rating", f"{E['r_opp']:.0f}", note(E["opp"], E["n_opp"])]]
+    if E["hs"] and R["h"]:
+        side = E["name"] if E["hs"] > 0 else E["name_opp"]
+        steps.append(["Home side", side, f"Home is worth about {abs(R['h']):.0f} rating points in this league"
+                      + (" (here the first-listed team does better, whoever hosts)" if R["h"] < 0 else "")])
+    gap = R["s"] * (E["r"] - E["r_opp"])
+    if E["draw"]:
+        src = "Kalshi’s draw price" if E["draw_src"] == "k" else "how often this league’s games end level"
+        steps.append(["Ratings say", f"{p_model * 100:.0f}%",
+                      f"{E['name']} takes {E['p'] * 100:.0f}% of the points (a draw counts half). With a "
+                      f"{E['draw'] * 100:.0f}% chance of a draw ({src}), that’s a {p_model * 100:.0f}% chance to win"])
+    else:
+        steps.append(["Ratings say", f"{p_model * 100:.0f}%",
+                      f"Chance {E['name']} wins, from the {abs(gap):.0f}-point gap"
+                      + (" with home included" if E["hs"] and R["h"] else "")])
+    sk = R["skill"] or 0.0
+    since = f" since {_md(R['first'])}" if R.get("first") else ""
+    steps.append(["How much the ratings know", f"{sk * 100:.0f}%",
+                  f"The ratings predicted {R['nobs']:,} past matches{since} before each result counted, and beat a "
+                  f"coin flip by {sk * 100:.0f}% (log loss). The edge leans on them less when that’s small"])
+    if E.get("m_n"):
+        steps.append(["Tested against Kalshi’s price", f"×{E['m']:.2f}",
+                      f"On {E['m_n']:,} settled matches in this sport, moving the price toward the ratings "
+                      + ("helped, so they get more weight than the default" if E["m"] > 1.02 else
+                         "didn’t help, so they get less weight than the default" if E["m"] < 0.98 else
+                         "made little difference so far, so the default weight stands")])
+    return {"k": r2(k), "m": "elo", "steps": steps}
+
+
+# ---------------------------------------------------------------- ratings
+def rating_id(group, code, name):
+    """Who a result belongs to in the ratings: tennis players by name across tours, everyone else per league."""
+    return slug(name) if group == "tennis" else f"{code}:{slug(name)}"
+
+
+def ratings(leagues, pool_of, live_pools, past, old, log):
+    """Elo ratings for every pool with games on the board -> ({pool: ratings}, {league: chance of a draw})."""
+    t0 = time.time()
+    matches, draw_rate, group_of = defaultdict(list), {}, {}
+    for lg, cfg in leagues.items():
+        pl = pool_of[lg]
+        if pl not in live_pools:
+            continue
+        g = group_of[pl] = cfg["group"]
+        evs = {}
+        for src in (old.get(lg, {}), past[lg].get("win", {})):     # the live API last: it's the freshest
+            for key, e in src.items():
+                cur = evs.setdefault(key, {})
+                for f, v in e.items():
+                    if f == "n":
+                        cur.setdefault("n", {}).update(v)
+                    else:
+                        cur[f] = v
+        full = defaultdict(set)              # the archive sometimes has only a code where the live API has a name
+        for e in evs.values():
+            for c, nm in (e.get("n") or {}).items():
+                if nm and nm != c:
+                    full[c].add(nm)
+        n_all = n_draw = 0
+        for key, e in evs.items():
+            names = e.get("n") or {}
+            codes = [c for c in names if c != "TIE"]
+            w = e.get("w")
+            if len(codes) != 2 or e.get("void") or not w or not e.get("d"):
+                continue
+            a, b = order_codes(key, codes)
+            sa = 0.5 if w == "TIE" else 1.0 if w == a else 0.0 if w == b else None
+            if sa is None:
+                continue
+            nm = {}
+            for c in (a, b):
+                x = names.get(c) or c
+                if x == c and len(full.get(c, ())) == 1:
+                    x = next(iter(full[c]))
+                nm[c] = x
+            n_all += 1
+            n_draw += sa == 0.5
+            home = None if g in elo.NEUTRAL else ("b" if g in AWAY_FIRST else "a")
+            matches[pl].append({"date": e["d"], "eid": key, "a": rating_id(g, a, nm[a]), "b": rating_id(g, b, nm[b]),
+                                "sa": sa, "home": home, "lg": lg})
+        if n_all >= 30:
+            draw_rate[lg] = n_draw / n_all if n_draw / n_all > 0.02 else 0.0
+        else:
+            draw_rate[lg] = 0.26 if g == "soccer" else 0.0
+    R = {}
+    for pl, ms in matches.items():
+        R[pl] = elo.rate(ms, group_of[pl])
+        R[pl]["label"] = elo.POOL_LABEL.get(pl) or (leagues.get(pl) or {}).get("label") or pl
+    big = sorted(R.items(), key=lambda kv: -kv[1]["matches"])
+    log(f"sports: ratings for {len(R)} pools, {sum(v['matches'] for v in R.values()):,} matches "
+        f"({time.time() - t0:.1f}s): " + ", ".join(
+            f"{pl} {v['matches']}/{v['nobs']} from {v['first']} s{v['s']} h{v['h']:.0f} "
+            f"skill {0 if v['skill'] is None else v['skill']:.3f}"
+            for pl, v in big[:45]))
+    return R, draw_rate
+
+
+def learn_weights(log):
+    """How much each sport's edge should lean on the ratings, learned from matches that have settled.
+
+    Every run saves each rated winner market's last price and forecast before the start. Once a match settles,
+    that's one test: did moving the price toward the ratings (by the weight used then, times m) predict the result
+    better than the price alone? m is fitted per sport by log loss and pulled toward 1 (the default weight) with
+    FIT_PRIOR matches' worth of weight, so it takes a few hundred settled matches to move it far. m = 0 would mean
+    the ratings add nothing to Kalshi's price; 2 would mean they deserve twice the default."""
+    saved = cache.get(CLOSE_KEY) or {}
+    memo, obs = {}, defaultdict(list)
+    for ticker, (mid, pe, k, date, grp) in saved.items():
+        parts = ticker.split("-")
+        if len(parts) < 3 or not k:
+            continue
+        series, key, code = parts[0], parts[1], parts[-1]
+        if series not in memo:
+            memo[series] = ((cache.entry(f"kalshi/settled3/{series}")[0] or {}).get("ev") or {})
+        e = memo[series].get(key)
+        if not e or e.get("void") or not e.get("w"):
+            continue
+        obs[grp].append((mid, pe, k, 1.0 if e["w"] == code else 0.0))
+    out = {}
+    for grp, xs in obs.items():
+        def loss(m):
+            tot = 0.0
+            for mid, pe, k, y in xs:
+                p = min(max(mid + m * k * (pe - mid), 1e-4), 1 - 1e-4)
+                tot -= y * math.log(p) + (1 - y) * math.log(1 - p)
+            return tot
+        best = min((m / 10 for m in range(0, 31)), key=loss)
+        n = len(xs)
+        m = (n * best + FIT_PRIOR * 1.0) / (n + FIT_PRIOR)
+        out[grp] = {"m": round(min(2.0, max(0.0, m)), 3), "fit": best, "n": n,
+                    "gain": round((loss(0.0) - loss(best)) / n, 5) if n else 0.0}
+    if out:
+        log("sports: rating weights learned from settled matches: " + ", ".join(
+            f"{g} m{v['m']} (fit {v['fit']} on {v['n']}, log loss -{v['gain']})" for g, v in sorted(out.items())))
+    return out
+
+
+def save_closing(rows, games, today):
+    """Keep each rated winner market's latest pre-start price and forecast, for learn_weights."""
+    saved = cache.get(CLOSE_KEY) or {}
+    cut = (today - dt.timedelta(days=CLOSE_DAYS)).isoformat()
+    saved = {t: v for t, v in saved.items() if v[3] >= cut}
+    for r in rows:
+        g = games.get(r["gid"]) or {}
+        if r.get("el") and r["stat"] == "win" and g.get("state") == "pre" and r.get("kraw") and r["mid"] is not None:
+            saved[r["id"]] = [r["mid"], r["p"], r["kraw"], g.get("date") or today.isoformat(), r["grp"]]
+    cache.put(CLOSE_KEY, saved)
+    return len(saved)
 
 
 # ---------------------------------------------------------------- everything
@@ -415,7 +693,7 @@ def build(today, log):
     empty = cache.get("kalshi/open-empty", EMPTY_TTL) or {}
     todo = [s for _, s, _ in all_series if not (s in empty and time.time() - empty[s] < EMPTY_TTL)]
     with ThreadPoolExecutor(max_workers=4) as ex:
-        fetched = dict(ex.map(arb.k_fetch, todo))
+        fetched = dict(ex.map(lambda s_: fetch_open(s_, log), todo))
     for s_ in todo:
         if fetched.get(s_):
             empty.pop(s_, None)
@@ -443,8 +721,12 @@ def build(today, log):
     log(f"sports: open games in {len(live_leagues)} leagues, {sum(len(v) for v in events.values())} games, "
         f"{len(todo)} of {len(all_series)} series checked ({time.time() - t0:.0f}s)")
 
-    # settled history only for leagues with games on the board
-    want = [(lg, s, kind) for lg, s, kind in all_series if lg in events]
+    # settled history for leagues with games on the board, plus the winners of any league that shares a ratings
+    # pool with one (a Challenger player's ITF results count toward his rating)
+    pool_of = {lg: elo.pool(lg, c["group"]) for lg, c in leagues.items()}
+    live_pools = {pool_of[lg] for lg in live_leagues}
+    want = [(lg, s, kind) for lg, s, kind in all_series
+            if lg in events or (kind == "win" and pool_of[lg] in live_pools)]
     # never fetched (or oldest) first, and winners before ladders: they're small and give every league its W/L record
     rank = {"win": 0, "btts": 1, "total": 2, "margin": 3, "tpts": 4}
     want.sort(key=lambda x: (cache.entry(f"kalshi/settled3/{x[1]}")[1] > 0, rank.get(x[2], 5),
@@ -471,13 +753,54 @@ def build(today, log):
                     cur[f] = v
     log(f"sports: settled history for {len(want)} series, {SETTLED_PAGES - budget[0]} pages fetched "
         f"({time.time() - t0:.0f}s)")
+
+    # older winners from Kalshi's archive, for the ratings only (the hit rates stay on this season's results)
+    old_todo = [(lg, s) for lg, s, kind in want if kind == "win"]
+    old_todo.sort(key=lambda x: ((cache.entry(f"kalshi/hist-win/{x[1]}")[0] or {}).get("done", False),
+                                 leagues[x[0]]["group"] not in ("tennis", "esports"),
+                                 cache.entry(f"kalshi/hist-win/{x[1]}")[1]))
+    hbudget = [HIST_PAGES]
+
+    def get_old(item):
+        lg, s = item
+        try:
+            return item, settled_old(s, hbudget)
+        except Exception as e:  # noqa: BLE001
+            log(f"sports: archive {s} failed {e!r}"[:200])
+            return item, (cache.entry(f"kalshi/hist-win/{s}")[0] or {}).get("ev", {})
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        old_by = list(ex.map(get_old, old_todo))
+    old = defaultdict(dict)                         # lg -> event key -> winner summary
+    for (lg, s), evs in old_by:
+        for key, e in evs.items():
+            cur = old[lg].setdefault(key, {})
+            for f, v in e.items():
+                if f == "n":
+                    cur.setdefault("n", {}).update(v)
+                else:
+                    cur[f] = v
+    done = sum(1 for lg, s in old_todo if (cache.entry(f"kalshi/hist-win/{s}")[0] or {}).get("done"))
+    log(f"sports: archive {done} of {len(old_todo)} winner series complete, {HIST_PAGES - hbudget[0]} pages fetched, "
+        f"{sum(len(v) for v in old.values()):,} older games ({time.time() - t0:.0f}s)")
+    R, draw_rate = ratings(leagues, pool_of, live_pools, past, old, log)
+    weights = learn_weights(log)
     starts = milestones(log)
 
     now = time.time()
     out = {"rows": [], "games": {}, "players": {}, "files": {}, "leagues": {}, "details": defaultdict(dict)}
+    merged = defaultdict(lambda: defaultdict(list))   # tennis: pool -> player -> matches on every tour, newest first
+    for lg, cfg in leagues.items():
+        if cfg["group"] == "tennis" and pool_of[lg] in live_pools and lg in past:
+            for tid, gs in team_history(lg, cfg, past[lg])[0].items():
+                merged[pool_of[lg]][tid.split(":", 1)[1]].extend(gs)
+    for mp in merged.values():
+        for gs in mp.values():
+            gs.sort(key=lambda g: (g["date"], g["eid"]), reverse=True)
     for lg in live_leagues:
         cfg = leagues[lg]
         hist, who = team_history(lg, cfg, past[lg])
+        Rp = R.get(pool_of[lg])
+        tennis = cfg["group"] == "tennis"
         n_rows = 0
         by_code = defaultdict(list)       # a code can belong to two players or teams; names tell them apart
         for tid, (c, name) in who.items():
@@ -506,6 +829,16 @@ def build(today, log):
             ev2 = {"key": key, "date": ev["date"], "state": state}
             gid = f"{lg}-{key}"
             union = None
+            hists = {c: (merged[pool_of[lg]].get(tids[c].split(":", 1)[1]) if tennis else None) or hist.get(tids[c], [])
+                     for c in (a, b)}
+            rid = {c: rating_id(cfg["group"], c, ev["names"][c]) if tennis else tids[c] for c in (a, b)}
+            home_code = None if cfg["group"] in elo.NEUTRAL else (b if cfg["group"] in AWAY_FIRST else a)
+            draw_mid = None
+            for p_, q_, _ in ev["markets"]:
+                if p_["k"] == "draw" and q_["yb"] and q_["ya"] and 0 < q_["yb"] < q_["ya"] < 1 \
+                        and q_["ya"] - q_["yb"] <= MAX_SPREAD:
+                    draw_mid = (q_["yb"] + q_["ya"]) / 2
+            p_draw, draw_src = (draw_mid, "k") if draw_mid is not None else (draw_rate.get(lg) or 0.0, "league")
             ladders = defaultdict(list)
             for p, q, _ in ev["markets"]:
                 yb, ya = q["yb"], q["ya"]
@@ -522,7 +855,7 @@ def build(today, log):
                     if union is None:
                         union, seen = [], set()
                         for c in (b, a):
-                            for g in hist.get(tids[c], []):
+                            for g in hists[c]:
                                 if g["eid"] not in seen:
                                     seen.add(g["eid"])
                                     union.append({**g, "team": c, "at": g["home"]})
@@ -536,10 +869,21 @@ def build(today, log):
                         continue
                     o = b if c == a else a
                     entity, pid = "team", f"{lg}-t-{slug(tids[c])}"
-                    h, opp = hist.get(tids[c], []), o
+                    h, opp = hists[c], o
                     home = (c == b) if cfg["group"] in AWAY_FIRST else None
                     name, team = ev["names"][c], c
                 ctx = {"pid": pid, "entity": entity, "opp": opp, "home": home}
+                if p["k"] == "win" and Rp:
+                    hs = 0 if home_code is None else (1 if c == home_code else -1)
+                    pe = elo.chance(Rp, rid[c], rid[o], hs)
+                    if pe is not None:
+                        ctx["elo"] = {"R": Rp, "me": rid[c], "opp": rid[o], "p": pe, "hs": hs,
+                                      "r": Rp["r"][rid[c]], "r_opp": Rp["r"][rid[o]],
+                                      "n": Rp["n"].get(rid[c], 0), "n_opp": Rp["n"].get(rid[o], 0),
+                                      "skill": Rp["skill"], "draw": p_draw or 0.0, "draw_src": draw_src,
+                                      "m": (weights.get(cfg["group"]) or {}).get("m", 1.0),
+                                      "m_n": (weights.get(cfg["group"]) or {}).get("n", 0),
+                                      "name": ev["names"][c], "name_opp": ev["names"][o], "label": Rp["label"]}
                 row, det = evaluate(lg, cfg, p, q, ev2, h, ctx)
                 out["rows"].append(row)
                 out["details"][pid][row["id"]] = det
@@ -559,6 +903,12 @@ def build(today, log):
             out["leagues"][lg] = {"label": cfg["label"], "group": cfg["group"], "unit": cfg["unit"], "rows": n_rows}
     for pid, blob in out["files"].items():
         blob["props"] = out["details"].get(pid, {})
+    try:
+        n_saved = save_closing(out["rows"], out["games"], today)
+        log(f"sports: {n_saved} rated markets saved for learning the weights")
+    except Exception as e:  # noqa: BLE001
+        log(f"sports: saving closing prices failed {e!r}"[:200])
+    out["weights"] = weights
     log(f"sports: {len(out['rows'])} rows, {len(out['games'])} games, {len(out['leagues'])} leagues "
         f"in {time.time() - t0:.0f}s")
     return out

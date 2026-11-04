@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Prop Finder: Picks</title>
-<meta name="description" content="The 10 Kalshi player props with the best edge after fees for today's NBA, NFL and NHL games.">
+<meta name="description" content="The 10 Kalshi bets with the best edge after fees for today's games: NBA, NFL and NHL player props and team bets, tennis, esports, soccer, college and every other sport on Kalshi.">
 <meta name="theme-color" content="#0c1430">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c1430'/%3E%3Crect x='6' y='16' width='4' height='10' rx='1.5' fill='%23d9446b'/%3E%3Crect x='12' y='9' width='4' height='17' rx='1.5' fill='%2334d399'/%3E%3Crect x='18' y='12' width='4' height='14' rx='1.5' fill='%2334d399'/%3E%3Crect x='24' y='6' width='4' height='20' rx='1.5' fill='%2334d399'/%3E%3Cpath d='M4 14h24' stroke='%23e8ecfa' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,15 +19,16 @@
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="16" width="5" height="12" rx="1.5" class="m-miss"/><rect x="9.5" y="8" width="5" height="20" rx="1.5" class="m-hit"/><rect x="17" y="12" width="5" height="16" rx="1.5" class="m-hit"/><rect x="24.5" y="4" width="5" height="24" rx="1.5" class="m-hit"/><path d="M0 14h32" class="m-line"/></svg>
       <h1>Prop Finder</h1>
-      <nav class="pages" aria-label="Pages"><a href="./">Props</a><a href="picks.html" aria-current="page">Picks</a><a href="arb.html">Arbitrage</a></nav>
+      <nav class="pages" aria-label="Pages"><a href="./">Props</a><a href="picks.html" aria-current="page">Picks</a></nav>
     </div>
     <p class="updated" id="updated" aria-live="polite">Loading picks…</p>
   </div>
+  <nav class="leagues" aria-label="Sport" id="sports"></nav>
 </header>
 
 <main>
   <section class="picks-head">
-    <h2 id="pk-title">Top 10 player props today</h2>
+    <h2 id="pk-title">Top 10 picks today</h2>
     <p class="sub" id="pk-sub"></p>
   </section>
   <ol class="picks" id="picks" aria-labelledby="pk-title"></ol>
@@ -35,13 +36,14 @@
 
   <details class="key">
     <summary>How the picks are chosen</summary>
-    <p>Every Kalshi player prop for today’s NBA, NFL and NHL games that hasn’t started yet, ranked by edge: the expected profit per $1 contract after Kalshi’s fee, using the same model as the props board.</p>
-    <p>To make the list, a prop also has to pass a few checks. The side you’d buy costs between 20¢ and 80¢, so no long shots. Its last 10 games and this season agree with the side, not just the model. Its confidence is medium or high and it has had at least 10 contracts traded. The player has no injury tag, no missed games, no role change and no sign of news the stats don’t know about. Each player appears once (his best line), and no game has more than 3 picks.</p>
-    <p>The list refreshes as prices move, so it can change during the day, and games drop off once they start.</p>
+    <p>Every Kalshi market for today’s games that hasn’t started yet, ranked by edge: the expected profit per $1 contract after Kalshi’s fee, from the same models as the props board. That covers NBA, NFL and NHL player props and team bets, and the game markets for every other sport Kalshi lists. Each tab is its own top 10, and the All tab takes at most 4 from one sport so one busy sport doesn’t fill it.</p>
+    <p>To make the list, a bet has to show an edge of at least half a cent per $1. The side you’d buy has to cost between 20¢ and 80¢, so no long shots. Its confidence has to be medium or high, with at least 10 contracts traded and a tight bid and ask. For player props and most game bets, the last 10 games and the season so far have to agree with the side, not just the model. Players can’t have an injury tag, missed games, a role change or any sign of news the stats don’t know about.</p>
+    <p>Winner markets outside the NBA, NFL and NHL (tennis, esports, soccer, college and the rest) use Elo ratings built from every result Kalshi has settled: beating a strong opponent counts for more than beating a weak one. Tennis players are rated across the ATP, Challenger and ITF tours (the WTA, WTA 125 and ITF for women), so a result on any tour counts. Those picks need at least 8 rated results for both sides. The ratings only know who won, not injuries, surfaces or lineups, so the edge moves only part of the way from Kalshi’s price toward them: less when they’ve predicted past results poorly, and less again the further they are from the price, since a big gap usually means news. Every match is also saved with its last price before the start, and once enough have settled, each sport’s weight is tested against the results and adjusted, so the ratings only get more say where they’ve actually beaten Kalshi’s price.</p>
+    <p>Each player or team appears once. A game gives at most one winner pick (yes on one side is the same bet as no on the other), and no game has more than 3 picks, 2 of them game bets. The list refreshes as prices move, so it can change during the day, and games drop off once they start (estimated start times get a 30-minute buffer).</p>
   </details>
 
   <footer class="foot">
-    <p>Edges here are small, often 1 to 3¢ per $1, and the model only knows box scores. These are the best-looking bets by the numbers, not sure things. Check the live price on Kalshi before you trade, and only bet what you can afford to lose.</p>
+    <p>Edges here are small, often 1 to 3¢ per $1, and the models only know results and box scores. These are the best-looking bets by the numbers, not sure things. Check the live price on Kalshi before you trade, and only bet what you can afford to lose.</p>
   </footer>
 </main>
 
