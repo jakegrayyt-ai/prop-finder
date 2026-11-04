@@ -569,9 +569,9 @@ def rating_id(group, code, name):
     return slug(name) if group == "tennis" else f"{code}:{slug(name)}"
 
 
-def ratings(leagues, pool_of, live_pools, past, old, log):
-    """Elo ratings for every pool with games on the board -> ({pool: ratings}, {league: chance of a draw})."""
-    t0 = time.time()
+def pool_matches(leagues, pool_of, live_pools, past, old):
+    """Every settled winner result, in the form the ratings take, for each pool with games on the board
+    -> ({pool: [match]}, {league: chance of a draw}, {pool: group})."""
     matches, draw_rate, group_of = defaultdict(list), {}, {}
     for lg, cfg in leagues.items():
         pl = pool_of[lg]
@@ -618,6 +618,13 @@ def ratings(leagues, pool_of, live_pools, past, old, log):
             draw_rate[lg] = n_draw / n_all if n_draw / n_all > 0.02 else 0.0
         else:
             draw_rate[lg] = 0.26 if g == "soccer" else 0.0
+    return matches, draw_rate, group_of
+
+
+def ratings(leagues, pool_of, live_pools, past, old, log):
+    """Elo ratings for every pool with games on the board -> ({pool: ratings}, {league: chance of a draw})."""
+    t0 = time.time()
+    matches, draw_rate, group_of = pool_matches(leagues, pool_of, live_pools, past, old)
     R = {}
     for pl, ms in matches.items():
         R[pl] = elo.rate(ms, group_of[pl])
@@ -679,9 +686,13 @@ def save_closing(rows, games, today):
     saved = cache.get(CLOSE_KEY) or {}
     cut = (today - dt.timedelta(days=CLOSE_DAYS)).isoformat()
     saved = {t: v for t, v in saved.items() if v[3] >= cut}
+    side = {t.rsplit("-", 1)[0]: t for t in saved}          # one side per match is enough: the other mirrors it
     for r in rows:
         g = games.get(r["gid"]) or {}
         if r.get("el") and r["stat"] == "win" and g.get("state") == "pre" and r.get("kraw") and r["mid"] is not None:
+            ev = r["id"].rsplit("-", 1)[0]
+            if side.setdefault(ev, r["id"]) != r["id"]:
+                continue
             saved[r["id"]] = [r["mid"], r["p"], r["kraw"], g.get("date") or today.isoformat(), r["grp"]]
     cache.put(CLOSE_KEY, saved)
     return len(saved)
