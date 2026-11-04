@@ -23,7 +23,7 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import cache, elo, model, stats
+from . import backtest, cache, elo, model, stats
 from . import kalshi as K
 from .net import get_json
 
@@ -470,9 +470,7 @@ def evaluate(lg, cfg, m, q, ev, hist, ctx):
         # the ratings know who beat whom, not injuries, form or surface, so the price still does most of the work,
         # and more of it the further apart the two are. kraw is the default weight; m is what settled matches
         # say the ratings deserve on top of it (learn_weights)
-        kraw = (ELO_K[0] if liquid else ELO_K[1]) * {"low": 0.5, "med": 1.0}[conf] * tail \
-            * min(1.0, n_min / ELO_FULL_N) * min(1.0, skill / ELO_FULL_SKILL) \
-            * math.exp(-max(0.0, abs(gap) - ELO_DECAY) / ELO_DECAY)
+        kraw = default_weight(mid, p_model, n_min, skill, liquid)
         k = kraw * E["m"]
         p_blend = model.clamp(mid + k * gap, 0.005, 0.995)
     elif not live:
@@ -513,6 +511,15 @@ def evaluate(lg, cfg, m, q, ev, hist, ctx):
         ["Trend estimate", f"{p_model * 100:.0f}%",
          f"The hit rate pulled toward the price with {PRIOR:.0f} games’ worth of weight, since a couple of months of results says little on its own"]]}
     return row, det
+
+
+def default_weight(mid, p_model, n_min, skill, liquid):
+    """How far the edge moves from Kalshi's price toward the ratings before the backtest's verdict (m) is applied."""
+    low = n_min < 6 or not liquid or skill < 0.02
+    tail = min(1.0, mid * (1 - mid) / 0.16)
+    return (ELO_K[0] if liquid else ELO_K[1]) * (0.5 if low else 1.0) * tail \
+        * min(1.0, n_min / ELO_FULL_N) * min(1.0, skill / ELO_FULL_SKILL) \
+        * math.exp(-max(0.0, abs(p_model - mid) - ELO_DECAY) / ELO_DECAY)
 
 
 def _ordinal(n):
@@ -556,10 +563,11 @@ def elo_details(E, mid, p_model, k):
                   f"coin flip by {sk * 100:.0f}% (log loss). The edge leans on them less when that’s small"])
     if E.get("m_n"):
         steps.append(["Tested against Kalshi’s price", f"×{E['m']:.2f}",
-                      f"On {E['m_n']:,} settled matches in this sport, moving the price toward the ratings "
-                      + ("helped, so they get more weight than the default" if E["m"] > 1.02 else
-                         "didn’t help, so they get less weight than the default" if E["m"] < 0.98 else
-                         "made little difference so far, so the default weight stands")])
+                      f"On {E['m_n']:,} settled matches in this sport, moving Kalshi’s pre-match price toward the "
+                      f"ratings " + ("helped, so they get more weight than the default" if E["m"] > 1.02 else
+                                     "made things worse, so the edge is just Kalshi’s price" if E["m"] < 0.05 else
+                                     "didn’t help much, so they get less weight than the default" if E["m"] < 0.98 else
+                                     "made little difference, so the default weight stands")])
     return {"k": r2(k), "m": "elo", "steps": steps}
 
 
@@ -635,10 +643,10 @@ def ratings(leagues, pool_of, live_pools, past, old, log):
             f"{pl} {v['matches']}/{v['nobs']} from {v['first']} s{v['s']} h{v['h']:.0f} "
             f"skill {0 if v['skill'] is None else v['skill']:.3f}"
             for pl, v in big[:45]))
-    return R, draw_rate
+    return R, draw_rate, matches, group_of
 
 
-def learn_weights(log):
+def learn_weights(log, tested=None):
     """How much each sport's edge should lean on the ratings, learned from matches that have settled.
 
     Every run saves each rated winner market's last price and forecast before the start. Once a match settles,
@@ -648,6 +656,11 @@ def learn_weights(log):
     the ratings add nothing to Kalshi's price; 2 would mean they deserve twice the default."""
     saved = cache.get(CLOSE_KEY) or {}
     memo, obs, seen = {}, defaultdict(list), set()
+    for grp, xs in (tested or {}).items():          # the daily backtest's matches (backtest.py)
+        for mid, pe, k, y, sk in xs:
+            if k and tuple(sk) not in seen:
+                seen.add(tuple(sk))
+                obs[grp].append((mid, pe, k, y))
     for ticker, (mid, pe, k, date, grp) in sorted(saved.items()):
         parts = ticker.split("-")
         if len(parts) < 3 or not k:
@@ -796,8 +809,28 @@ def build(today, log):
     done = sum(1 for lg, s in old_todo if (cache.entry(f"kalshi/hist-win/{s}")[0] or {}).get("done"))
     log(f"sports: archive {done} of {len(old_todo)} winner series complete, {HIST_PAGES - hbudget[0]} pages fetched, "
         f"{sum(len(v) for v in old.values()):,} older games ({time.time() - t0:.0f}s)")
-    R, draw_rate = ratings(leagues, pool_of, live_pools, past, old, log)
-    weights = learn_weights(log)
+    R, draw_rate, matches, group_of = ratings(leagues, pool_of, live_pools, past, old, log)
+    series_of = {}                                  # (league, event key) -> its winner series; + "a": first-listed code
+    for (lg, s, kind), evs in past_by:
+        if kind == "win":
+            for key in evs:
+                series_of[(lg, key)] = s
+    for (lg, s), evs in old_by:
+        for key in evs:
+            series_of.setdefault((lg, key), s)
+    for lg in leagues:
+        for src in ((past.get(lg) or {}).get("win") or {}, old.get(lg) or {}):
+            for key, e in src.items():
+                codes = [c for c in (e.get("n") or {}) if c != "TIE"]
+                if len(codes) == 2:
+                    series_of[(lg, key, "a")] = order_codes(key, codes)[0]
+    try:
+        tested, tests = backtest.run(BASE, matches, group_of, draw_rate, series_of,
+                                     {pl: v["skill"] for pl, v in R.items()}, default_weight, log)
+    except Exception as e:  # noqa: BLE001
+        log(f"sports: backtest failed {e!r}"[:300])
+        tested, tests = {}, {}
+    weights = learn_weights(log, tested)
     starts = milestones(log)
 
     now = time.time()
@@ -923,6 +956,7 @@ def build(today, log):
     except Exception as e:  # noqa: BLE001
         log(f"sports: saving closing prices failed {e!r}"[:200])
     out["weights"] = weights
+    out["tests"] = {g: {**v, "m": (weights.get(g) or {}).get("m", 1.0)} for g, v in tests.items()}
     log(f"sports: {len(out['rows'])} rows, {len(out['games'])} games, {len(out['leagues'])} leagues "
         f"in {time.time() - t0:.0f}s")
     return out

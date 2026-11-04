@@ -504,7 +504,7 @@ def main():
                 json.dump(blob, f, separators=(",", ":"))
         X["rows"].sort(key=lambda r: (r["be"] is None, -(r["be"] or -9)))
         more = {"updated": board["updated"], "leagues": X["leagues"], "groups": sports.GROUPS,
-                "games": X["games"], "players": X["players"], "props": X["rows"]}
+                "games": X["games"], "players": X["players"], "props": X["rows"], "tests": X.get("tests", {})}
         with open(os.path.join(OUT, "more.json"), "w") as f:
             json.dump(more, f, separators=(",", ":"))
     with open(os.path.join(OUT, "debug.json"), "w") as f:

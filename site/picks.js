@@ -35,6 +35,9 @@
   const SPORTS = [['all', 'All sports'], ['nba', 'NBA'], ['nfl', 'NFL'], ['nhl', 'NHL'], ['tennis', 'Tennis'], ['esports', 'Esports'],
     ['soccer', 'Soccer'], ['college', 'College'], ['more', 'More sports']];
   const SPORT_WORD = { all: '', nba: 'NBA', nfl: 'NFL', nhl: 'NHL', tennis: 'tennis', esports: 'esports', soccer: 'soccer', college: 'college', more: '' };
+  const CHIP_GROUPS = { tennis: ['tennis'], esports: ['esports'], soccer: ['soccer'], college: ['cfb', 'cbb'] };
+  const GROUP_WORD = { tennis: 'tennis', esports: 'esports', soccer: 'soccer', cfb: 'college football', cbb: 'college basketball',
+    hoops: 'basketball', hockey: 'hockey', football: 'football', baseball: 'baseball', cricket: 'cricket', fights: 'fight', other: '' };
   const sportOf = (r) => (r.src !== 'k' ? r.lg
     : ['tennis', 'esports', 'soccer'].includes(r.grp) ? r.grp : r.grp === 'cfb' || r.grp === 'cbb' ? 'college' : 'more');
 
@@ -351,6 +354,26 @@
     }));
   }
 
+  // The daily test of the ratings against Kalshi's pre-match prices, for the sport this tab covers (backtest.py)
+  function testNote(sport) {
+    const T = (D && D.tests) || {};
+    const named = Object.values(CHIP_GROUPS).flat();
+    const groups = sport === 'more' ? Object.keys(T).filter((g) => !named.includes(g)) : CHIP_GROUPS[sport] || [];
+    const best = groups.filter((g) => T[g] && T[g].n).sort((a, b) => T[b].n - T[a].n)[0];
+    if (!best) return '';
+    const v = T[best], word = GROUP_WORD[best] ?? best;
+    const unit = best === 'tennis' || best === 'esports' || best === 'fights' ? 'matches' : 'games';
+    let t = `Tested on ${v.n.toLocaleString()} ${word ? word + ' ' : ''}${unit} from the last ${v.days} days: `
+      + (v.mkt <= v.rat ? 'Kalshi’s price before the start called the winner better than the ratings did'
+        : 'the ratings called the winner better than Kalshi’s price before the start');
+    const b = v.bets || {};
+    if (b.n >= 30) t += `, and betting every edge the ratings showed would have ${b.per_bet < 0 ? 'lost' : 'made'} ${Math.abs(b.per_bet * 100).toFixed(1)}¢ per $1 over ${b.n.toLocaleString()} bets`;
+    t += '.';
+    if (v.m != null && v.m < 0.1) t += ` So winner bets here go by Kalshi’s price alone, and they only make the list if something else gives them an edge.`;
+    else if (v.m != null) t += ` The ratings get ${v.m >= 0.98 ? 'their full' : 'a reduced'} say in the edge here.`;
+    return t;
+  }
+
   function renderTabs() {
     $('#sports').innerHTML = SPORTS.map(([k, name]) => {
       const n = choose(C, k).length;
@@ -374,6 +397,9 @@
       if (n < N) sub += n === 1 ? ' It’s the only one that passes every check right now.' : ` Only ${n} pass every check right now.`;
     }
     $('#pk-sub').textContent = sub;
+    const note = ['all', 'nba', 'nfl', 'nhl'].includes(sport) ? '' : testNote(sport);
+    $('#pk-test').textContent = note;
+    $('#pk-test').hidden = !note;
     $('#picks').innerHTML = picks.map((c, i) => cardHTML(c, i, details.get(c.r.id))).join('');
     const empty = $('#empty');
     empty.hidden = picks.length > 0;
@@ -381,7 +407,7 @@
       const w = word ? word + ' ' : '';
       empty.textContent = !cnt.todays ? `Kalshi has nothing posted for today’s ${w}games yet.`
         : !cnt.open ? `Today’s ${w}games have all started. Tomorrow’s picks show up once Kalshi posts those markets.`
-          : `No ${w}bet for today’s games passes every check right now${sport === 'all' || ['nba', 'nfl', 'nhl'].includes(sport) ? '' : '. The edge leans mostly on Kalshi’s price, and none of what’s left clears the fee'}. The board still has all of them.`;
+          : `No ${w}bet for today’s games passes every check right now. The board still has all of them.`;
     }
     renderTabs();
     return picks;
@@ -409,12 +435,13 @@
       $('#updated').textContent = 'Couldn’t load the picks. Refresh the page to try again.';
       return;
     }
-    D = { updated: board.updated, props: board.props, games: { ...board.games }, players: { ...board.players }, leagues: {} };
+    D = { updated: board.updated, props: board.props, games: { ...board.games }, players: { ...board.players }, leagues: {}, tests: {} };
     if (more) {
       D.props = D.props.concat(more.props || []);
       Object.assign(D.games, more.games || {});
       Object.assign(D.players, more.players || {});
       D.leagues = more.leagues || {};
+      D.tests = more.tests || {};
     }
     threeWay = new Set(D.props.filter((r) => r.stat === 'draw').map((r) => r.gid));
     const picks = render();
