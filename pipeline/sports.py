@@ -640,12 +640,15 @@ def learn_weights(log):
     FIT_PRIOR matches' worth of weight, so it takes a few hundred settled matches to move it far. m = 0 would mean
     the ratings add nothing to Kalshi's price; 2 would mean they deserve twice the default."""
     saved = cache.get(CLOSE_KEY) or {}
-    memo, obs = {}, defaultdict(list)
-    for ticker, (mid, pe, k, date, grp) in saved.items():
+    memo, obs, seen = {}, defaultdict(list), set()
+    for ticker, (mid, pe, k, date, grp) in sorted(saved.items()):
         parts = ticker.split("-")
         if len(parts) < 3 or not k:
             continue
         series, key, code = parts[0], parts[1], parts[-1]
+        if (series, key) in seen:       # a match's two sides mirror each other: count it once
+            continue
+        seen.add((series, key))
         if series not in memo:
             memo[series] = ((cache.entry(f"kalshi/settled3/{series}")[0] or {}).get("ev") or {})
         e = memo[series].get(key)
