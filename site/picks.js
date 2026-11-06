@@ -367,10 +367,15 @@
       + (v.mkt <= v.rat ? 'Kalshi’s price before the start called the winner better than the ratings did'
         : 'the ratings called the winner better than Kalshi’s price before the start');
     const b = v.bets || {};
-    if (b.n >= 30) t += `, and betting every edge the ratings showed would have ${b.per_bet < 0 ? 'lost' : 'made'} ${Math.abs(b.per_bet * 100).toFixed(1)}¢ per $1 over ${b.n.toLocaleString()} bets`;
+    if (b.n >= 30) {
+      const c = Math.abs(b.per_bet * 100).toFixed(1);
+      t += Math.abs(b.per_bet) > 2 * b.se
+        ? `, and betting every edge the ratings showed would have ${b.per_bet < 0 ? 'lost' : 'made'} ${c}¢ per $1 over ${b.n.toLocaleString()} bets`
+        : `, and betting every edge the ratings showed would have come out about even (${b.per_bet < 0 ? '−' : '+'}${c}¢ per $1 over ${b.n.toLocaleString()} bets, within the noise)`;
+    }
     t += '.';
-    if (v.m != null && v.m < 0.1) t += ` So winner bets here go by Kalshi’s price alone, and they only make the list if something else gives them an edge.`;
-    else if (v.m != null) t += ` The ratings get ${v.m >= 0.98 ? 'their full' : 'a reduced'} say in the edge here.`;
+    if (v.m != null && v.m < 0.1) t += ' So winner bets here go by Kalshi’s price alone, and only make this list if something else gives them an edge.';
+    else if (v.m != null) t += ' The edge leans on the ratings only a little, which came out about even, so they keep that small say.';
     return t;
   }
 
