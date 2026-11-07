@@ -182,14 +182,15 @@
     for (const c of pool) {
       const r = c.r;
       // one line per player or team; one moneyline, spread and total per game (yes on one side = no on the other)
-      const fam = isProp(r) ? null : `${r.gid}|${r.stat === 'win' || r.stat === 'draw' ? 'ml' : r.stat === 'tpts' ? 'tt' + r.pid : r.stat}`;
+      const solo = isProp(r) || r.kind === 'player';
+      const fam = solo ? null : `${r.gid}|${r.stat === 'win' || r.stat === 'draw' ? 'ml' : r.stat === 'tpts' || r.sl ? 'tt' + r.pid + r.stat : r.stat}`;
       if (seenPid.has(r.pid) || (fam && seenBet.has(fam))) continue;
       const g = perGame.get(r.gid) || { all: 0, bets: 0 };
-      if (g.all >= PER_GAME || (!isProp(r) && g.bets >= PER_GAME_BETS)) continue;
+      if (g.all >= PER_GAME || (!solo && g.bets >= PER_GAME_BETS)) continue;
       if (sport === 'all' && (perSport.get(c.sport) || 0) >= PER_SPORT_ALL) continue;
       seenPid.add(r.pid);
       if (fam) seenBet.add(fam);
-      perGame.set(r.gid, { all: g.all + 1, bets: g.bets + (isProp(r) ? 0 : 1) });
+      perGame.set(r.gid, { all: g.all + 1, bets: g.bets + (solo ? 0 : 1) });
       perSport.set(c.sport, (perSport.get(c.sport) || 0) + 1);
       picks.push(c);
       if (picks.length === N) break;
@@ -220,7 +221,11 @@
       case 'total': return { yesTxt: `over ${half(r.line)}`, txt: `${c.yes ? 'Over' : 'Under'} ${half(r.line)} ${u}`, note: '' };
       case 'btts': return { yesTxt: 'both score', txt: c.yes ? 'Both teams score' : 'Not both teams score', note: '' };
       case 'draw': return { yesTxt: 'draw', txt: c.yes ? 'It’s a draw' : 'No draw', note: c.yes ? '' : 'either team winning pays' };
-      default: return { yesTxt: r.stat, txt: r.stat, note: '' };
+      default: {
+        const L = (r.sl || r.stat).toLowerCase();
+        const who = r.kind === 'game' ? '' : `${name} `;
+        return { yesTxt: `${who}${r.line}+ ${L}`, txt: c.yes ? `${who}${r.line}+ ${L}` : `${who}under ${half(r.line)} ${L}`, note: '' };
+      }
     }
   }
 
@@ -265,7 +270,10 @@
       case 'total': return `${yes ? 'Over' : 'Under'} ${half(line)} in ${of}${r.kind === 'game' ? ' of the two teams’ games' : ''}` + tail;
       case 'btts': return `${yes ? 'Both teams scored' : 'At least one team was shut out'} in ${of}` + tail;
       case 'draw': return `${yes ? 'Ended level' : 'Had a winner'} in ${of}` + tail;
-      default: return `${hit} of the last ${n}` + tail;
+      default: {
+        const L = (r.sl || r.stat).toLowerCase();
+        return `${yes ? `${line}+` : `Under ${half(line)}`} ${L} in ${of}${r.kind === 'game' ? ' of the two teams’ games' : ''}` + tail;
+      }
     }
   }
 
@@ -314,7 +322,7 @@
       const t = teamBet(c);
       const vs = r.home === true ? 'vs' : r.home === false ? '@' : 'vs';
       const against = r.kind === 'game' ? '' : ` · ${vs} ${esc(oppName(r, G))}`;
-      who = `<span class="pname">${esc(P.name)}</span><span class="meta"><span class="lg">${esc(lgName(r))}</span>${against}, ${esc(when(G))}</span>`;
+      who = `<span class="pname">${esc(P.name)}</span><span class="meta"><span class="lg">${esc(lgName(r))}</span>${r.kind === 'player' && P.team ? ` ${esc(P.team)}` : ''}${against}, ${esc(when(G))}</span>`;
       bet = esc(t.txt);
       if (!c.yes) px += ` · No on “${esc(t.yesTxt)}”`;
       if (t.note) px += ` (${esc(t.note)})`;

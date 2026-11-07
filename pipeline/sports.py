@@ -19,11 +19,12 @@ import datetime as dt
 import math
 import os
 import re
+import sys
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import backtest, cache, elo, model, stats
+from . import backtest, cache, elo, kprops, model, stats
 from . import kalshi as K
 from .net import get_json
 
@@ -948,6 +949,10 @@ def build(today, log):
                                          "games": [{f: x[f] for f in keep if x.get(f) is not None} for x in h[:60]]}
         if n_rows:
             out["leagues"][lg] = {"label": cfg["label"], "group": cfg["group"], "unit": cfg["unit"], "rows": n_rows}
+    try:
+        kprops.build(today, leagues, out, starts, sys.modules[__name__], log)
+    except Exception as e:  # noqa: BLE001
+        log(f"props: failed {e!r}"[:300])
     for pid, blob in out["files"].items():
         blob["props"] = out["details"].get(pid, {})
     try:

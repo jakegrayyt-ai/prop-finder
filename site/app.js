@@ -60,7 +60,7 @@
   // Team bets: Kalshi's moneylines, spreads ("wins by over 8.5" = -8.5), game totals and team totals.
   // Their line is the whole number that wins (9 = by 9 or more), like a prop's "25+".
   const isTeam = (r) => !!r.kind;                        // 'team' or 'game' (a game total)
-  const kindOk = (r) => S.kind === 'all' || (S.kind === 'team') === isTeam(r);
+  const kindOk = (r) => S.kind === 'all' || (S.kind === 'team') === (isTeam(r) && r.kind !== 'player');
   const half = (line) => fmtNum(line - 0.5);
   // a win is a margin of 1 or more; Kalshi-history games without a known margin use +1 / -1 / 0 for win, loss, draw
   const valOf = (g, stat) => (stat === 'win' ? (g.s.margin ?? g.s.wl) : g.s[stat]);
@@ -105,6 +105,7 @@
   const statLabel = (lg, st, r) => {
     const x = (STATS[lg] || {})[st];
     if (x) return x;
+    if (r && r.sl) return r.sl;                 // props for the other sports carry their own label
     const u = r && r.u;
     if (st === 'total' && (u === 'maps' || u === 'games')) return `Total ${u}`;
     if (st === 'margin' && (u === 'maps' || u === 'games')) return `${u === 'maps' ? 'Map' : 'Game'} spread`;
@@ -443,7 +444,7 @@
     if (isK(r)) {
       const oppName = r.opp === G.away ? G.away_name : G.home_name;
       const at = r.home === false ? '@' : 'vs';
-      who = `<span><span class="lg">${esc(lgLabel(r))}</span></span><span>${game ? '' : `${at} ${esc(oppName || r.opp)}, `}${esc(fmtWhen(G))}</span>`;
+      who = `<span><span class="lg">${esc(lgLabel(r))}</span>${r.kind === 'player' && P.team ? ` ${esc(P.team)}` : ''}</span><span>${game ? '' : `${at} ${esc(oppName || r.opp)}, `}${esc(fmtWhen(G))}</span>`;
     }
     const margin = r.stat === 'win' || r.stat === 'margin';
     const venueChip = isK(r) && r.home == null ? chip(null, r.mid, 'Venue').replace('class="c-hr"', 'class="c-hr" title="Kalshi doesn’t say who’s at home for this sport"')
@@ -776,6 +777,11 @@
 
   function kMeans(r) {   // the other sports: Kalshi's names, no "the" ("Arsenal wins")
     const t = esc(teamName(r)), u = unitOf(r), soccer = r.grp === 'soccer';
+    if (r.sl) {
+      const what = esc(r.sl.toLowerCase()), no = r.line - 1 === 0 ? 'none' : `${r.line - 1} or fewer`;
+      if (r.kind === 'game') return `<b>Yes</b> if the game has ${r.line} or more ${what} between both teams. <b>No</b> if ${no}.`;
+      return `<b>Yes</b> if ${t} gets ${r.line} or more ${what}. <b>No</b> if ${no}.${r.kind === 'player' ? ' Kalshi’s rules cover what happens if he doesn’t play.' : ''}`;
+    }
     if (r.stat === 'win') return `<b>Yes</b> if ${t} wins. <b>No</b> if ${t} loses${soccer ? ' or draws' : ''}.`;
     if (r.stat === 'draw') return '<b>Yes</b> if it ends in a draw after 90 minutes plus stoppage time. <b>No</b> if either team wins.';
     if (r.stat === 'btts') return '<b>Yes</b> if both teams score. <b>No</b> if at least one doesn’t.';
@@ -796,6 +802,7 @@
 
   function teamHitText(r, hits, n) {
     const u = unitOf(r);
+    if (r.sl) return `got ${r.line}+ ${r.sl.toLowerCase()} in ${hits} of ${n} games`;
     if (r.stat === 'win') return `won ${hits} of ${n} games`;
     if (r.stat === 'draw') return `ended in a draw in ${hits} of ${n} games`;
     if (r.stat === 'btts') return `both teams scored in ${hits} of ${n} games`;
@@ -852,9 +859,9 @@
 
   function kLogHTML(pf, r, stat) {
     const games = pf.games.filter((g) => (g.date || '') < (r.G.date || '9999')).slice(0, 20);
-    if (!games.length) return `<div class="sec"><h3>Results</h3><p class="note">No settled games on Kalshi yet for ${r.kind === 'game' ? 'either team' : 'this team'}.</p></div>`;
+    if (!games.length) return `<div class="sec"><h3>Results</h3><p class="note">No settled games on Kalshi yet for ${r.kind === 'game' ? 'either team' : r.kind === 'player' ? 'this player' : 'this team'}.</p></div>`;
     const game = r.kind === 'game', u = unitOf(r);
-    const colName = { win: 'Margin', margin: 'Margin', tpts: u === 'points' ? 'PTS' : 'Scored', total: 'Total', draw: 'Draw', btts: 'Both scored' }[stat];
+    const colName = { win: 'Margin', margin: 'Margin', tpts: u === 'points' ? 'PTS' : 'Scored', total: 'Total', draw: 'Draw', btts: 'Both scored' }[stat] || r.sl || stat;
     const body = games.map((g) => {
       const v = valOf(g, stat);
       const known = v != null;
