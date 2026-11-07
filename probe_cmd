@@ -1,4 +1,11 @@
 set -e
 export PROP_OUT=debug
-mkdir -p debug
-python -m pipeline.probe_series | tee debug/series.txt
+mkdir -p debug/p
+start=$(date +%s)
+python -m pipeline.build
+echo "build took $(( $(date +%s) - start ))s" > debug/timing.txt
+cp -r site/index.html site/app.js site/styles.css site/picks.html site/picks.js debug/
+rm -rf debug/p_keep && mkdir -p debug/p_keep
+find debug/p \( -name '*-tp-*' -o -name '*-p-*' -o -name '*-gp-*' \) | grep -v -- '-p-[0-9]' | head -2500 | xargs -I{} cp {} debug/p_keep/ 2>/dev/null || true
+find debug/p \( -name 'ncaaf-t-*' -o -name 'epl-t-*' \) | head -300 | xargs -I{} cp {} debug/p_keep/ 2>/dev/null || true
+rm -rf debug/p && mv debug/p_keep debug/p
