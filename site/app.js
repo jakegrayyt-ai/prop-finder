@@ -19,7 +19,7 @@
   const BINARY = new Set(['dd', 'td3']);
   const UNIT = { nba: 'points', nfl: 'points', nhl: 'goals' };
   // Every other sport Kalshi lists (more.json): game markets only, history from Kalshi's own settled markets.
-  const GROUP_CHIPS = [['cfb', 'College football'], ['cbb', 'College hoops'], ['soccer', 'Soccer'], ['tennis', 'Tennis'],
+  const GROUP_CHIPS = [['cfb', 'College football'], ['cbb', 'College basketball'], ['soccer', 'Soccer'], ['tennis', 'Tennis'],
     ['fights', 'UFC & boxing'], ['esports', 'Esports'], ['hoops', 'Basketball'], ['hockey', 'Hockey'], ['football', 'Football'],
     ['baseball', 'Baseball'], ['cricket', 'Cricket'], ['other', 'Other']];
   const GENERIC = { win: 'Moneyline', draw: 'Draw', margin: 'Spread', tpts: 'Team total', total: 'Game total', btts: 'Both teams score' };
