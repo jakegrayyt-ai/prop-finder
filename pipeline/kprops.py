@@ -45,14 +45,15 @@ VAL_RE = re.compile(r"(\d+(?:\.\d+)?)")
 HOMEAWAY_RE = re.compile(r"Home:\s*(at least\s*)?(\d+(?:\.\d+)?)\s*,\s*Away:\s*(at least\s*)?(\d+(?:\.\d+)?)", re.I)
 
 
-def series_list(log):
-    """Every prop series outside the core leagues: [(ticker, league key, kind, stat, label, tag)]."""
+def series_list(leagues):
+    """Every prop series outside the core leagues: [(ticker, league key, kind, stat, label, tag)]. Only leagues the
+    site already has game markets for, which also drops look-alikes ("first to make a three", season home runs)."""
     raw = cache.get("kalshi/series-sports") or []
     out = []
     for s in raw:
         t = s.get("ticker") or ""
         m = SERIES_RE.match(t)
-        if not m or t.startswith(CORE):
+        if not m or t.startswith(CORE) or m.group(1)[2:].lower() not in leagues:
             continue
         kind, stat, label = KIND[m.group(2)]
         out.append((t, m.group(1)[2:].lower(), kind, stat, label, (s.get("tags") or [""])[0]))
@@ -261,7 +262,7 @@ def evaluate(row_base, q, played, line, live, stat):
 def build(today, leagues, out, starts, SP, log):
     """Adds the prop rows, games, players and files to sports.build's output."""
     t0 = time.time()
-    plist = series_list(log)
+    plist = series_list(leagues)
     empty = cache.get("kalshi/props-open-empty") or {}
     todo = [s for s, *_ in plist if not (s in empty and time.time() - empty[s] < EMPTY_TTL)]
     with ThreadPoolExecutor(max_workers=4) as ex:
